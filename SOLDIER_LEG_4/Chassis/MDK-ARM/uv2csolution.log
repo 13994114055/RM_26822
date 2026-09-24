@@ -1,0 +1,17 @@
+0 out of 1 target(s) converted
+
+Error: 1 error(s), 1 warning(s):
+
+Errors:
+
+	The target "Cboard" is configured to use Arm Compiler 5.
+
+	CMSIS csolution projects support Arm Compiler 6 only.
+
+	For details on how to manually migrate to AC6, see
+
+	https://developer.arm.com/documentation/100068/0621/Migrating-from-Arm-Compiler-5-to-Arm-Compiler-for-Embedded-6
+
+Warnings:
+
+	For target "Cboard" file 'E:/BOF_RM/SOLDIER_LEG_4/Chassis/External_Device/BMI088/Controller/Inc' does not exists
