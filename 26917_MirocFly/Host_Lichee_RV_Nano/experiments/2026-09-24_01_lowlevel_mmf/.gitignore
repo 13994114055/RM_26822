@@ -1,0 +1,6 @@
+capture
+*.o
+*.raw
+*.bmp
+*.png
+*.jpg

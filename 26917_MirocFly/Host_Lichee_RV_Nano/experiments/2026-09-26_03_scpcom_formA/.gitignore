@@ -1,0 +1,6 @@
+camera
+*.o
+*.raw
+*.bmp
+*.png
+*.jpg

@@ -1,0 +1,24 @@
+; MirocFly 传感器配置模板
+; 拷贝为 /mnt/data/sensor_cfg.ini 后修改（优先级最高）
+; 传感器 name 必须是 sample_comm.h 里 SAMPLE_SNS_TYPE_E 的字符串名
+; LicheeRV Nano defconfig 启用的候选: GCORE_GC4653 / OV_OV2685 / OV_OS04A10 / SMS_SC035GS
+
+[source]
+type=dev
+dev_num=1
+
+[sensor]
+name=GCORE_GC4653_MIPI_4M_30FPS_10BIT
+bus_id=2
+sns_i2c_addr=-1
+mipi_dev=0
+lane_id=2 1 3 0 4
+pn_swap=0 0 0 0 0
+hw_sync=0
+mclk_en=1
+mclk=1
+orien=0
+mux_dev=0
+attach_dev=0
+switch_gpio=0
+switch_pol=0

@@ -1,0 +1,6 @@
+green_detect
+*.o
+*.raw
+*.bmp
+*.png
+*.jpg

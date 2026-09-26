@@ -1,0 +1,14 @@
+# ---- AT32 下位机构建产物 ----
+*.o
+*.d
+*.elf
+*.bin
+*.hex
+*.map
+*.lst
+build/
+Debug/
+Release/
+
+# ---- IDE ----
+.idea/

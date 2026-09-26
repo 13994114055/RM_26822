@@ -1,0 +1,14 @@
+# ---- OS / 编辑器 ----
+.DS_Store
+*.swp
+*~
+
+# ---- 通用编译产物 (兜底) ----
+*.o
+*.d
+
+# ---- 第三方 SDK / 预编译库 (体积巨大或为独立仓库, 不入库; 获取方式见 README「第三方依赖」) ----
+Host_Lichee_RV_Nano/LicheeRV-Nano-Build_official/
+Host_Lichee_RV_Nano/LicheeSG-Nano-Build_scpcom/
+Host_Lichee_RV_Nano/opencv-mobile-5.0.0-licheerv-nano/
+Host_Lichee_RV_Nano/CVI_HW_OpenCV/

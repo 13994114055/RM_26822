@@ -1,0 +1,6 @@
+rtsp_grab
+*.o
+*.raw
+*.bmp
+*.png
+*.jpg
