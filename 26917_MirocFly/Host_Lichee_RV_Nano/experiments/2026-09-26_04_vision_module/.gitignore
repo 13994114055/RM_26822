@@ -1,0 +1,6 @@
+frame_grab
+*.o
+*.raw
+*.bmp
+*.png
+*.jpg
