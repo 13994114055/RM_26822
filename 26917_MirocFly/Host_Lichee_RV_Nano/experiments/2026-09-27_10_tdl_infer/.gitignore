@@ -1,0 +1,8 @@
+tdl_app
+*.o
+*.raw
+*.jpg
+*.bmp
+*.png
+libs/
+models/

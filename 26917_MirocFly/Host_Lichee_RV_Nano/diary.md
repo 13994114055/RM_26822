@@ -84,6 +84,22 @@ bsh 'cd /root/mirocfly && (LD_LIBRARY_PATH=/mnt/system/usr/lib:/mnt/system/usr/l
 ```
 安全：无目标回中；油门默认 1000（不转）；真机联调**拔桨→绑绳→短飞**。
 
+### 2.6 NPU 部署 demo（实验 `2026-09-26_09_npu_demo`）
+```bash
+cd experiments/2026-09-26_09_npu_demo
+# 下载官方模型(cv181x INT8, 若未下载过)
+mkdir -p models && curl -L -o models/yolov8n_det_coco80_640_640_INT8_cv181x.cvimodel \
+  https://github.com/sophgo/tdl_models/raw/main/cv181x/yolov8n_det_coco80_640_640_INT8_cv181x.cvimodel
+make                                  # 编译 npu_hello(底层) + tdl_detect(高层)
+scp npu_hello tdl_detect models/yolov8n_det_coco80_640_640_INT8_cv181x.cvimodel root@10.222.2.1:/root/mirocfly/
+LP=/mnt/system/usr/lib:/mnt/system/usr/lib/3rd:/mnt/system/lib:/usr/bin/lib:/maixapp/lib:/mnt/system/opt/cvitek_tpu_sdk/lib
+# 步骤1: 底层 cviruntime 分类(用板上模型)
+bsh "cd /root/mirocfly && LD_LIBRARY_PATH=$LP ./npu_hello /usr/bin/mobilenet_v2_rgb_224_int8.cvimodel"
+# 步骤2: 高层 TDL 检测(需把测试图 test.png 也传到板上)
+bsh "cd /root/mirocfly && LD_LIBRARY_PATH=$LP ./tdl_detect yolov8n_det_coco80_640_640_INT8_cv181x.cvimodel test.png"
+```
+> NPU 程序同样适用"后台+sleep+killall"；链接要点：**须链 `board_libs` + `-lgcc_s`，不链 `-ltdl_ex`**（见 `difficulty_and_method.md` B13）。
+
 ## 3. 常见问题速查
 
 - **取帧全黑**：先丢前导帧（warmup≥10）；确认用 scpcom 中间件（见 `difficulty_and_method.md` B7/B9）。
