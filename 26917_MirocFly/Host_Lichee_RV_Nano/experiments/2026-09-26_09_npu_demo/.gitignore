@@ -1,0 +1,13 @@
+npu_hello
+tdl_detect
+vi_detect
+*.o
+*.raw
+*.png
+*.jpg
+npu_libs/
+tdl_libs/
+include_tdl/
+models/
+thirdparty/
+sample_utils/*.o

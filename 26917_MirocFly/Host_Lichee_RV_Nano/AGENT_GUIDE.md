@@ -29,7 +29,7 @@ LicheeRV Nano (SG2002) —— Linux视觉层: 采集→识别→目标选择→�
 |---|---|---|
 | **0 相机出帧** | 交叉编译取帧程序 → CSI 抓帧存 NV21；获 `VIDEO_FRAME_INFO_S` | 🟢 **打通（Form A：`experiments/…/04_vision_module`）**；`05_rtsp_stream` RTSP 预览通 |
 | **1 绿色荧光（过渡）** | HSV 检测荧光绿 → 多目标选择 → 像素偏移→摇杆修正（ANGLE）→ MSP 注入 INAV | 🟡 **检测(06)+链路(07)已通，闭环程序(08)已写**；真机联调待下位机 |
-| **2 不规则物体（最终）** | YOLOv8n 自训 → INT8 cvimodel → TDL SDK 部署 NPU → 撞击 → 自稳 → 30s 返航 | ⏳ |
+| **2 不规则物体（最终）** | YOLOv8n 自训 → INT8 cvimodel → TDL SDK 部署 NPU → 撞击 → 自稳 → 30s 返航 | 🟡 **NPU 部署通路已通**（09：官方 YOLOv8n INT8 检测 17.6 FPS）；自训/量化待做 |
 | **3 自写固件（远期）** | 下位机自研飞控（原 AT32 计划，现随下位机更替而变） | ⏳ 远期 |
 
 **阶段 0 结论（重要，已更正）**：
@@ -71,7 +71,9 @@ Host_Lichee_RV_Nano/
 │   ├── 2026-09-26_05_rtsp_stream/          # ✅VI→VENC(H265)→RTSP 实时预览 (rtsp_grab)
 │   ├── 2026-09-26_06_hsv_green/            # ✅HSV 绿色检测 (green_detect; 出 offset/area, 存 BMP)
 │   ├── 2026-09-26_07_msp_link/             # ✅MSP 链路 (msp.c/msp_test; SET_RAW_RC+RAW_IMU, offset→RC; PTY 自测)
-│   └── 2026-09-26_08_vision_control/       # ✅识别绿色并飞过去 (green_fly; 检测+MSP 闭环; PTY/真串口)
+│   ├── 2026-09-26_08_vision_control/       # ✅识别绿色并飞过去 (green_fly; 检测+MSP 闭环; PTY/真串口)
+│   ├── 2026-09-26_09_npu_demo/             # ✅NPU 部署 (npu_hello 底层 cviruntime; tdl_detect 高层 TDL 检测)
+│   └── 2026-09-27_10_tdl_infer/            # ✅可复用推理层 (mf/tdl.h; 相机+检测+画框+RTSP)
 ├── board_libs/                             # 板上 scpcom .so 链接副本 (gitignore; fetch_board_libs.sh)
 ├── LicheeSG-Nano-Build_scpcom/             # scpcom 源码树(中间件/样例/tdl_sdk)
 └── LicheeRV-Nano-Build_official/           # 官方工具链 + 内核头
@@ -87,6 +89,8 @@ Host_Lichee_RV_Nano/
 - **`experiments/2026-09-26_06_hsv_green/`（✅绿色检测）**：PC 调参（`pc_tune/detect_green.py`）+ 板端 `green_detect.cpp`（opencv-mobile）。VI→NV21→BGR→HSV→最大轮廓→`offset/area`→存 `green.bmp`。阈值 PIL H85-130/S40-170/V55-170（OpenCV H60-91）；OpenCV5 的轮廓函数在 **geometry** 模块；**无 imgcodecs** 故写 BMP。运行：`LD_LIBRARY_PATH=… ./green_detect 1280 720 60`。
 - **`experiments/2026-09-26_07_msp_link/`（✅MSP 链路）**：纯 C（`msp.c`）。MSP v1（csum=异或）编解码/流式解析/串口/`offset→RC`。**无硬件自测**：`./msp_test`（selftest + **PTY 模拟 FC** 端到端）。真硬件：`./msp_test inject /dev/ttyS1 460800 10`（注入）/ `monitor`（回读）。
 - **`experiments/2026-09-26_08_vision_control/`（✅识别绿色并飞过去）**：06 检测 + 07 链路合成。`green_fly`：检测 offset → `msp_offset_to_rc` → `SET_RAW_RC`；默认 **PTY 假 FC**（无硬件可跑），给串口参数即注入真 FC。安全：无目标回中、油门默认 1000。
+- **`experiments/2026-09-26_09_npu_demo/`（✅NPU 部署入门）**：步骤1 `npu_hello` 底层 **cviruntime**（mobilenet 226 FPS）；步骤2 `tdl_detect` 高层 **TDL** 图片检测（官方 `yolov8n_det_coco80_640` INT8，**17.6 FPS**）；步骤3 `vi_detect` **相机实时检测**（TDL 内部 VI，1280×720，**16.4 FPS**）。链接：需链 `board_libs` + `-lgcc_s`；**不链 `-ltdl_ex`**（拉 libcurl，板上 libssl 不匹配，见 B13）；编译 `sample_utils.cpp` 还需 nlohmann/json + OpenCV 头。运行需 `LD_LIBRARY_PATH` 含 `/mnt/system/usr/lib:/mnt/system/usr/lib/3rd:/mnt/system/lib:/usr/bin/lib:/maixapp/lib:/mnt/system/opt/cvitek_tpu_sdk/lib`。
+- **`experiments/2026-09-27_10_tdl_infer/`（✅可复用推理层）**：`include/mf/tdl.h`(C 接口) + `src/mf_tdl.cpp`（相机/TDL检测/自绘框/RTSP）。`tdl_app` 相机实时检测 + 画框 + RTSP 叠加：`rtsp://10.222.2.1:554/h265`（**H265** 1280×720，~16 FPS）。**坑见 B14**：`TDL_WrapImage` 传**帧指针**（`VIDEO_FRAME_INFO_S *frame=NULL; TDL_WrapImage(image,&frame)`），传结构体会导致 RTSP 花屏。
 - **实验 01/02/03（旧/存档）**：低层 MMF、sipeed 链、Form A 首次实验，均不再作为正解。
 - `sensor_cfg.ini`：GC4653 **beta**（= 板默认）；由镜像 `/etc/init.d/S02config` 选 alpha/beta + 设 pinmux。
 - **工具链**：`LicheeRV-Nano-Build_official/host-tools/gcc/riscv64-linux-musl-x86_64/`。

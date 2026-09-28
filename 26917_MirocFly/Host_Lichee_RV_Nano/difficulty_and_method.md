@@ -117,6 +117,20 @@
 - **小目标过滤**：在 640×360 缩略图上检测时，`min_area` 别设大（200 会把 3 米外 ~20cm 目标滤掉）→ 改 **20**。
 - **链接**：opencv-mobile 静态库按 `-lopencv_geometry -lopencv_imgproc -lopencv_features -lopencv_core` 顺序，放进 `--start-group`。
 
+### B13. NPU/TDL 部署的三个链接坑（SG2002）
+- **背景**：板上 NPU 运行时齐（`libcviruntime/cvikernel/cvimath` + `/dev/cvi-tpu0`）、TDL 运行时在 `/mnt/system/lib/libtdl_{core,ex,utils}.so`；官方 cv181x 模型在 `sophgo/tdl_models`。
+- **坑1（DSO 符号可见性）**：`libtdl_*.so` 依赖板上中间件符号（`CVI_SYS_/VPSS_/VENC_/VI_/ISP_/…`），但**未声明为 NEEDED**；musl 不做惰性绑定 → 运行时报大量 `Error relocating ... symbol not found`。**解决：把 `board_libs` 显式链进本程序**（`-lsys -lvi -lvpss …`，同 `-lgdc` 教训）。
+- **坑2（隐藏原子符号）**：链接报 `hidden symbol '__sync_fetch_and_add_1' in libgcc.a(atomic.o) is referenced by DSO`。**解决：加 `-lgcc_s`**（用共享 libgcc，而非静态 libgcc.a 的隐藏符号）。
+- **坑3（传递依赖版本错配）**：`libtdl_ex.so` 依赖 `libcurl`，而板上 **libcurl 与 libssl 版本不匹配**（`SSL_get0_group_name: symbol not found`）→ 启动即失败。**解决：基础检测不需要它，不链 `-ltdl_ex`**；`TDL_ReleaseObjectMeta` 在 `libtdl_core` 里。
+- **附（运行环境）**：`LD_LIBRARY_PATH` 需含 `/mnt/system/usr/lib:/mnt/system/usr/lib/3rd:/mnt/system/lib:/usr/bin/lib:/maixapp/lib:/mnt/system/opt/cvitek_tpu_sdk/lib`。
+- **实测性能**：MobileNetV2@224（cviruntime 底层）**4.43ms/帧≈226FPS**；YOLOv8n@640 INT8（TDL）**56.97ms/帧≈17.6FPS**（与文档 17~27FPS 吻合）。
+
+### B14. TDL 相机实时 + RTSP 叠加（实验10）的坑
+- **花屏（绿紫竖条纹）根因**：`TDL_WrapImage` 输出的是**帧指针**，正确用法 `VIDEO_FRAME_INFO_S *frame=NULL; TDL_WrapImage(image,&frame);`；我们误传栈上结构体 `VIDEO_FRAME_INFO_S vf; TDL_WrapImage(image,&vf);` → 喂给 VENC 的帧信息错乱 → 花屏。**改成指针后正常出图**。
+- **相机格式**：用 `IMAGE_YUV420SP_UV`(NV12)，与官方 `sample_vi_detection` 一致。
+- **RTSP 在 `libtdl_utils.so`**（导出 `SendFrameRTSP` + RTSP 类），只依赖 `libcvi_rtsp.so`（板上 `/mnt/system/lib`），**不拉 libcurl**；监听 `0.0.0.0:554`，流路径随编码命名：**H265→`/h265`**（H264→`/h264`）。代码默认用 **H265**（`pay_load_type=PT_H265`，省带宽）。
+- **瞬态取帧失败**：`CVI_VPSS_GetChnFrame failed / FrameBuffer is empty` 在多次运行后出现，`vi_detect`/`test_mmf` 同样挂，**干净重启即恢复**（非硬件损坏；一度误判相机被烧）。
+
 ---
 
 ## C. 内存 / ION 认知（由困难衍生）
@@ -250,4 +264,6 @@ cd /root && /mnt/system/usr/bin/test_mmf 4 ; ls -la /root/*.jpg
   - **2026-09-26（晚）目录重组为 experiments/**：`app/{capture,camera,camera_scpcom,vision}` → `experiments/{2026-09-24_01_lowlevel_mmf, 2026-09-26_02_sipeed_middleware, 2026-09-26_03_scpcom_formA, 2026-09-26_04_vision_module}`，新建索引 `experiments/README.md`。
   - **2026-09-26（晚）RTSP 打通**：新增实验 `experiments/2026-09-26_05_rtsp_stream/`，实现 VI→VENC(H265)→RTSP（复用 scpcom `rtsp_server/` + `media_server` 静态库），主机 `ffmpeg` 收到 `hevc 1280x720@30fps` 真实画面；新增 **B11**（RTSP 绑定网卡坑）。
   - **2026-09-26（晚）绿色检测（阶段1 感知）**：新增实验 `experiments/2026-09-26_06_hsv_green/`，PC 调阈值 + 上板 opencv-mobile 实时 HSV 检测，3 米外 ~20cm 绿目标稳定检出 `offset/area` 并存 BMP；新增 **B12**（HSV 标度/OpenCV5 geometry/imgcodecs 缺失→写 BMP/小目标 min_area）。
+  - **2026-09-27（阶段2 启动）**：新增实验 `experiments/2026-09-26_09_npu_demo/`，**NPU 部署通路打通**——步骤1 底层 `cviruntime`（mobilenet 226FPS）、步骤2 高层 `TDL`（官方 YOLOv8n@640 INT8 检出 person、17.6FPS）。新增 **B13**（TDL 部署三坑：DSO 符号/隐藏原子符号/libcurl 版本错配）。
+  - **2026-09-28（部署深化）**：新增实验 `experiments/2026-09-27_10_tdl_infer/`——**可复用推理层**（`mf/tdl.h` C 接口 + `mf_tdl.cpp`：相机/TDL检测/自绘框/RTSP），相机实时检测 + RTSP 叠加（`rtsp://10.222.2.1:554/h265`，H265，~16FPS）。新增 **B14**（`TDL_WrapImage` 指针语义导致 RTSP 花屏；瞬态取帧失败重启即恢复）。
   - **2026-09-26（晚）MSP 链路（阶段1 链路）**：新增实验 `experiments/2026-09-26_07_msp_link/`（纯 C，不依赖中间件）；实现 MSP v1 编解码/流式解析/串口/`offset→RC`。**无硬件自测法**：用 **PTY（`posix_openpt`）在同进程内模拟 FC** 做端到端收发（客户端↔模拟FC），验证 termios+分帧+校验，`selftest`+`pty` 均 OK。真串口 UART1@460800 待下位机。
