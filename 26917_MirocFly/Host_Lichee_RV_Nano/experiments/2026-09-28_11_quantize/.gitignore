@@ -1,0 +1,12 @@
+*.onnx
+*.cvimodel
+*.mlir
+*_cali_table
+*.npz
+images/
+work/
+resnet18/onnx/
+resnet18/images/
+resnet18/*.cvimodel
+resnet18/*.mlir
+resnet18/*_cali_table

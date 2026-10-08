@@ -1,0 +1,6 @@
+# 实验12 PC 端原型依赖 (与板端 opencv-mobile 5.0.0 对齐)
+# 建议用独立 venv, 别动系统 Python:
+#   python3 -m venv ~/.venvs/mirocfly
+#   ~/.venvs/mirocfly/bin/pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
+opencv-python==5.0.0.93
+numpy
