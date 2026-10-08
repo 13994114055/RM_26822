@@ -1,0 +1,19 @@
+2026/09/27 13:06:00: Closed port
+2026/09/27 13:08:39: Unplugged
+2026/09/27 13:08:40: Plugged in
+2026/09/27 13:09:04: Unplugged
+2026/09/27 13:09:05: Plugged in
+2026/09/27 13:10:49: Opened serial port
+2026/09/27 13:10:49: MultiWii API version received: 2.6.0
+2026/09/27 13:10:49: Flight controller info, identifier: INAV version: 10.0.0
+2026/09/27 13:10:49: Running firmware released on: Sep 26 2026 18:30:49
+2026/09/27 13:10:49: Board: BFG4, version: 0
+2026/09/27 13:10:49: Unique device ID received - 0x02b00253235511235363938
+2026/09/27 13:10:54: Trying to read 4 ESCs
+2026/09/27 13:10:54: Read ESC 1: A-X-5 - Bluejay, 0.19, 96kHz
+2026/09/27 13:10:54: Read ESC 2: A-X-5 - Bluejay, 0.19, 96kHz
+2026/09/27 13:10:57: Failed processing command cmd_DeviceInitFlash after 5 retries. 
+2026/09/27 13:10:57: MessageNotOkError: Message not OK 
+2026/09/27 13:10:57: Failed reading ESC 3
+2026/09/27 13:10:58: Read ESC 4: A-X-5 - Bluejay, 0.21.0, 96kHz
+2026/09/27 13:10:58: Done reading ESCs

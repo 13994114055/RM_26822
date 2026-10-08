@@ -18,16 +18,16 @@ LicheeRV Nano (SG2002) 上位机 —— Linux视觉层: 采集→识别→目标
         │  近期: MSP (SET_RAW_RC 注入 + RAW_IMU/ATTITUDE 回读)
         │  远期: 0xAA 0x55 | X:int16 | Y:int16 | Area:uint16 | Status:uint8 | CRC8
         ▼
-下位机 —— 近期: INAV(黑盒稳定器, 预编译不可重编)
+下位机 BetaFPV G473 (STM32G474) —— 近期: INAV 10.0.0(自移植, 已能飞)
         │  远期: 自研飞控(姿态解算+PID+混控+状态机+撞击检测+30s返航)
         │
-        ├── UART7 CRSF 数字接收机（物理RC直连，RC优先）
-        ├── UART5 光流计 MTF-02P (115200)
-        ├── SPI1  IMU LSM6DSOWTR
-        └── I2C2  磁力计 QMC5883P + 气压计 SPL06-001
+        ├── UART? CRSF 数字接收机（物理RC，RC优先）   ← 新板映射未定
+        ├── UART? 光流计 MTF-02P                     ← 新板映射未定
+        ├── SPI1  IMU
+        └── I2C?  磁力计 + 气压计                    ← 新板映射未定
 ```
 
-**⚠️ 下位机硬件已更替**：原 **AT32F435 直驱空心杯**方案动力不足（**升力约 59g < 整机 76g，无法起飞**）→ 改为**无刷电机 + 自带无刷驱动（ESC）的主控**。**上下位机接口/通信约定保持不变**。新主控硬件未到手，其开发暂缓；AT32 经验存档见 `Low_MCU/archive_at32/agent_at32.md`（已冻结）。
+**⚠️ 下位机硬件已更替**：原 **AT32F435 直驱空心杯**方案动力不足（**升力约 59g < 整机 76g，无法起飞**）→ 新主控 **BetaFPV G473（STM32G474，无刷 + 四合一 ESC）**，与**烧毁的板子同款、已重购**；**自研移植 INAV 10.0.0（STM32G4）已能飞**。**但尚未本土化**（上位机 MSP / 光流 / 接口映射未定），**旧接口约定不再默认成立**。AT32 经验存档见 `Low_MCU/archive_at32/agent_at32.md`（已冻结）；新主控见 `Low_MCU/new_mcu/README.md`。
 
 **接口抽象**：上位机统一产出 `TargetInfo{偏移X, 偏移Y, Area(∝1/距离²), Status}`，链路层仅换编码器（近期 MSP 摇杆值 / 远期自定义帧），上层任务逻辑两阶段零改动，**下位机主控更替也不影响上位机**。
 
@@ -36,10 +36,10 @@ LicheeRV Nano (SG2002) 上位机 —— Linux视觉层: 采集→识别→目标
 | 决策 | 内容 |
 |---|---|
 | 下位机策略 | 近期 INAV（只配置不改固件）；远期自研飞控 |
-| **下位机硬件** | **改无刷 + 自带 BLDC 驱动的主控**（原 AT32 直驱空心杯升力不足被淘汰） |
+| **下位机硬件** | **BetaFPV G473（STM32G474，无刷 + 四合一 ESC）**，与烧毁的同款已重购；自移植 INAV 10.0.0(G4) 能飞（原 AT32 直驱空心杯升力不足被淘汰） |
 | 通信协议 | 近期 **MSP**（INAV 串口仅支持 MSP）；远期自定义帧 `0xAA 0x55` |
-| INAV 固件 | 板上 **INAV 9.0.0**，预编译**不能重编** |
-| RC 优先 | INAV `MSP RC Override` 飞行模式（9.0.0 默认启用）+ `msp_override_channels`=AETR；飞行员拨杆切换 |
+| INAV 固件 | 新板 **自移植 INAV 10.0.0（STM32G4，可重编）**；旧 AT32 板的 INAV 9.0.0 为不可重编的预编译版（随 AT32 淘汰） |
+| RC 优先 | INAV `MSP RC Override` 模式（`BOX_MSP_RC_OVERRIDE` + `msp_override_channels`，**需 CLI 配置、默认不覆盖**）；飞行员拨杆切换 |
 | 视觉方案 | 阶段1 绿色荧光 HSV（过渡）；阶段2 不规则物体 **YOLOv8n→INT8→TDL SDK→NPU**；HSV 仅兜底 |
 | **相机方案** | **用 scpcom 镜像 + scpcom 中间件**（官方镜像 GC4653 中间件坏；相机硬件正常）。自写程序须用 scpcom 公有头编译 + 链接板上 scpcom 库，**禁止混用 sipeed/官方中间件**（混用→取帧全黑） |
 | 撞击检测 | 近期上位机轮询 `MSP_RAW_IMU`(102) + 视觉 bbox 阈值；远期下位机 IMU 检测 |
@@ -53,7 +53,7 @@ LicheeRV Nano (SG2002) 上位机 —— Linux视觉层: 采集→识别→目标
 | 0 相机出帧 | 交叉编译 + CSI 抓帧 | 🟢 **`experiments/…/04_vision_module` Form A 出真图**；`05_rtsp_stream` RTSP 预览打通（B7/B9/B11 已解） | 阶段 1（HSV）或 MSP 链路 |
 | 1 绿色荧光 | HSV → 视觉→控制闭环（INAV） | 🟡 **检测(06)+MSP链路(07)均已通**；二者闭环未接、待下位机 | 闭环联调(offset→RC→注入) |
 | 2 不规则物体 | YOLOv8n NPU 部署 → 撞击 → 30s 返航 | 🟡 **部署(09/10)+量化(11)已通**；自训装甲模型待 4060 | 训练+导出 → 量化 → 部署 |
-| 3 自写固件 | 下位机自研飞控 | ⏳ 远期 | 随新主控硬件推进 |
+| 3 自写固件 | 下位机自研飞控 | ⏳ 远期 | 新主控 G473 已重购、INAV G4 能飞；待上位机对接后推进 |
 
 ## 5. 当前工程实况
 
@@ -75,8 +75,8 @@ LicheeRV Nano (SG2002) 上位机 —— Linux视觉层: 采集→识别→目标
 - 面试复盘文档 `Host_Lichee_RV_Nano/interview_notes.md`（按项目阶段组织的 Q&A）；知识点速查 `edge_ai_cheatsheet.md`。
 
 **下位机** `Low_MCU/`
-- AT32 方案**已冻结**（`archive_at32/agent_at32.md`）；新主控（无刷驱动）**未到手**，见 `Low_MCU/new_mcu/`。
-- AT32 侧：INAV 9.0.0 已刷；Workbench 骨架（外设初始化 + 9 个 FreeRTOS 空任务）；未实现飞控逻辑。
+- AT32 方案**已冻结**（`archive_at32/agent_at32.md`）。
+- 新主控 = **BetaFPV G473（STM32G474）**，与烧毁的同款**已重购**；**自研移植 INAV 10.0.0（STM32G4）当前能飞**；**尚未本土化**（上位机 MSP / 光流 / 接口映射未定）。工作区 `new_mcu/drone/`，详见 `new_mcu/README.md`。
 
 ## 6. 技术要点速查
 
@@ -102,5 +102,5 @@ LicheeRV Nano (SG2002) 上位机 —— Linux视觉层: 采集→识别→目标
 2. ION 泄漏：Form A/RTSP 正常退出（SIGTERM）可回收（实测 used=0）；**`kill -9` 会泄漏**，需干净重启；程序清理路径在异常分支仍待加固。
 3. **不需要**构建 scpcom 的 kernel/middleware（app 只要公有头 + 板上库）。
 4. NPU INT8 对自定义目标精度（HSV 兜底）；**缺 TDL SDK**。
-5. 新下位机主控选型与到来后的开发（动力/接口）。
+5. 下位机新主控 G473：**上位机对接（MSP）/ 光流 / 接口映射**尚未做（固件已能飞）。
 6. 撞击检测采样率受限 → 与视觉联合判定。
