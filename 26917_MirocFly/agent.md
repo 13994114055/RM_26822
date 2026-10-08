@@ -52,7 +52,7 @@ LicheeRV Nano (SG2002) 上位机 —— Linux视觉层: 采集→识别→目标
 |---|---|---|---|
 | 0 相机出帧 | 交叉编译 + CSI 抓帧 | 🟢 **`experiments/…/04_vision_module` Form A 出真图**；`05_rtsp_stream` RTSP 预览打通（B7/B9/B11 已解） | 阶段 1（HSV）或 MSP 链路 |
 | 1 绿色荧光 | HSV → 视觉→控制闭环（INAV） | 🟡 **检测(06)+MSP链路(07)均已通**；二者闭环未接、待下位机 | 闭环联调(offset→RC→注入) |
-| 2 不规则物体 | YOLOv8n NPU 部署 → 撞击 → 30s 返航 | 🟡 **NPU 部署通路已通**（09：官方 YOLOv8n INT8 检测 17.6 FPS）；自训/量化待做 | 相机实时检测 → 自训装甲模型 |
+| 2 不规则物体 | YOLOv8n NPU 部署 → 撞击 → 30s 返航 | 🟡 **部署(09/10)+量化(11)已通**；自训装甲模型待 4060 | 训练+导出 → 量化 → 部署 |
 | 3 自写固件 | 下位机自研飞控 | ⏳ 远期 | 随新主控硬件推进 |
 
 ## 5. 当前工程实况
@@ -61,7 +61,7 @@ LicheeRV Nano (SG2002) 上位机 —— Linux视觉层: 采集→识别→目标
 - **镜像 = scpcom 构建**（`/boot/ver`≈`6f9596`，内核 `2026-07-14`，中间件 `libsys 87be70b`）；源码树已克隆至 `LicheeSG-Nano-Build_scpcom/`（`scpcom/LicheeSG-Nano-Build`，sophgo weekly 2024.10.14 中间件）。
 - 板上 `test_mmf`（scpcom 编）取**相机**帧 → 真图；**自写程序 `experiments/…/03_scpcom_formA`（Form A）也已出真图**（黑帧根因 = 中间件版本混用 + 抓启动首帧，均已在 `04_vision_module` 解决）。注：scpcom 版 `test_mmf 4` 走**相机**（`_test_venc_jpg` 用 `mmf_vi_frame_pop`），sipeed 版的才是合成彩条图。
 - 默认 sensor 配置 = **beta**（`lane_id=4,3,2 / mclk=1 / bus4 / i2c 0x29`），由镜像 `/etc/init.d/S02config` 决定：无 `/boot/alpha|epsilon` → beta + pinmux（`devmem 0x0300116C=0x3, 0x0300118C=0x5`）。**我们的 `sensor_cfg.ini` 内容 = beta，并未改坏配置**。
-- **实验档案制**（每次尝试一个目录，索引 `Host_Lichee_RV_Nano/experiments/README.md`）：01 低层MMF / 02 sipeed链 / 03 FormA首验 / 04 相机层 / 05 RTSP / 06 绿色检测 / 07 MSP 链路 / 08 识别绿色并飞向(闭环) / 09 NPU 部署(底层 cviruntime + 高层 TDL 检测) / 10 TDL 推理层(相机+检测+画框+RTSP)。
+- **实验档案制**（每次尝试一个目录，索引 `Host_Lichee_RV_Nano/experiments/README.md`）：01 低层MMF / 02 sipeed链 / 03 FormA首验 / 04 相机层 / 05 RTSP / 06 绿色检测 / 07 MSP 链路 / 08 识别绿色并飞向(闭环) / 09 NPU 部署(底层 cviruntime + 高层 TDL 检测) / 10 TDL 推理层(相机+检测+画框+RTSP) / 11 TPU-MLIR 量化(ONNX→cv181x INT8 cvimodel)。
 - `experiments/2026-09-26_04_vision_module/`（✅相机层）：Form A——`camera.h` API + `frame_grab` CLI；编译 scpcom `maix_mmf/sophgo_middleware.c`，链接 `Host_Lichee_RV_Nano/board_libs/`（`fetch_board_libs.sh` 拉取，**不进板**；`-lsample` 等，**必须 `-lgdc`**）；`mf_camera_warmup(10)` 丢前导帧。
 - `experiments/2026-09-26_05_rtsp_stream/`（✅RTSP）：VI→VENC(H265)→RTSP；复用 scpcom `rtsp_server/`+`media_server` 静态库；**必须显式绑 IP**（`RTSP_IP=10.222.2.1`，否则绑到 wlan0，见 B11）；仅 H265；退出用 SIGTERM 勿 `kill -9`。
 - `experiments/2026-09-26_06_hsv_green/`（✅绿色检测）：opencv-mobile HSV；阈值 PIL H85-130/S40-170/V55-170 = OpenCV H60-91/S40-170/V55-170；轮廓函数在 **geometry** 模块(`-lopencv_geometry`)；无 imgcodecs 故**直接写 BMP**；小目标 `min_area=20`。
@@ -70,6 +70,9 @@ LicheeRV Nano (SG2002) 上位机 —— Linux视觉层: 采集→识别→目标
 - `experiments/2026-09-26_09_npu_demo/`（✅NPU 部署入门）：步骤1 `npu_hello`(底层 cviruntime，mobilenet 226 FPS)；步骤2 `tdl_detect`(高层 TDL，官方 yolov8n_det_coco80@640 INT8，**17.6 FPS**，检出 person 0.90)；步骤3 `vi_detect`(**相机实时检测 16.4 FPS**)。链接坑：TDL 需板上中间件符号→链 `board_libs`；`-lgcc_s` 解隐藏原子符号；**不链 `-ltdl_ex`**（它拉 libcurl，板上 libcurl/libssl 不匹配，见 B13）。
 - 板上 NPU 运行时齐（`libcviruntime/cvikernel/cvimath` + `/dev/cvi-tpu0`），TDL 运行时在 `/mnt/system/lib/libtdl_{core,ex,utils}.so`；模型 `/usr/bin/{mobilenet_v2_rgb_224_int8,resize_net_3_int8,yolov5s_224_int8}.cvimodel`；官方 cv181x 模型仓库 `sophgo/tdl_models`。
 - `experiments/2026-09-27_10_tdl_infer/`（✅可复用推理层）：`mf/tdl.h`(C 接口) + `mf_tdl.cpp`(相机/TDL检测/自绘框/RTSP)。RTSP `rtsp://10.222.2.1:554/h265`（H265），~16FPS。坑见 B14（`TDL_WrapImage` 传指针不是传结构体，否则 RTSP 花屏）。
+- `experiments/2026-09-28_11_quantize/`（✅量化打通）：TPU-MLIR（docker 镜像走算能 CDN + `docker load`；容器内 `pip install tpu_mlir` 后 commit）。`resnet18.onnx` → `resnet18_cv181x_int8_sym.cvimodel`，板上 NPU 43.9FPS。三段式：`model_transform→run_calibration→model_deploy --processor cv181x --quantize INT8`。坑见 B15。量化在 Linux i5；训练在 Win11(4060)。
+- `experiments/2026-09-29_12_armor_led/`（🟡传统CV装甲板 S0+S1）：**并行兜底/预研**，不依赖训练。S0 纯 PIL + 自解单应生成**透视梯形**合成图 21 张（含真值 `labels.csv`）；S1 `pc_tune/detect_armor.py`（**cv2**，PC venv 装 `opencv-python 5.0.0` 与板端 opencv-mobile 5.0.0 对齐）：通道差→形态学→minAreaRect→同色**松弛配对**→**四点四边形中心**，合成集**召回/精确 100%、中心误差 0.34px**。坑见 B16（灯条长轴取错对角线；中心受 boxPoints 内外边影响）。S2 板端移植待做。
+- 面试复盘文档 `Host_Lichee_RV_Nano/interview_notes.md`（按项目阶段组织的 Q&A）；知识点速查 `edge_ai_cheatsheet.md`。
 
 **下位机** `Low_MCU/`
 - AT32 方案**已冻结**（`archive_at32/agent_at32.md`）；新主控（无刷驱动）**未到手**，见 `Low_MCU/new_mcu/`。

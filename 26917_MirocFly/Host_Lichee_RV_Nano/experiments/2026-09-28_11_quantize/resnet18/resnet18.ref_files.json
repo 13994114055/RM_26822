@@ -1,0 +1,28 @@
+{
+  "version": "v1.30.2-20260831",
+  "files": {
+    "origin_model": {
+      "path": "onnx/resnet18.onnx",
+      "last_modify": 1790667332.8851151
+    },
+    "origin_mlir": {
+      "path": "resnet18_origin.mlir",
+      "last_modify": 1790668014.377518
+    },
+    "top_mlir": {
+      "path": "resnet18.mlir",
+      "last_modify": 1790668014.785675
+    },
+    "mlir_input": {
+      "path": "resnet18_in_f32.npz",
+      "last_modify": 1790668014.9046721
+    },
+    "top_output": {
+      "path": "resnet18_ref_outputs.npz",
+      "last_modify": 1790668015.2276645
+    }
+  },
+  "commands": {
+    "transform_cmd": "/usr/local/lib/python3.10/dist-packages/tpu_mlir/python/tools/model_transform.py --model_name resnet18 --model_def onnx/resnet18.onnx --input_shapes [[1,3,224,224]] --mean 123.675,116.28,103.53 --scale 0.01712475,0.017507,0.01742919 --pixel_format rgb --test_input images/img_001.jpg --test_result resnet18_top_outputs.npz --mlir resnet18.mlir"
+  }
+}

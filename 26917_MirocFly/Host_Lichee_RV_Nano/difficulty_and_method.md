@@ -131,6 +131,23 @@
 - **RTSP 在 `libtdl_utils.so`**（导出 `SendFrameRTSP` + RTSP 类），只依赖 `libcvi_rtsp.so`（板上 `/mnt/system/lib`），**不拉 libcurl**；监听 `0.0.0.0:554`，流路径随编码命名：**H265→`/h265`**（H264→`/h264`）。代码默认用 **H265**（`pay_load_type=PT_H265`，省带宽）。
 - **瞬态取帧失败**：`CVI_VPSS_GetChnFrame failed / FrameBuffer is empty` 在多次运行后出现，`vi_detect`/`test_mmf` 同样挂，**干净重启即恢复**（非硬件损坏；一度误判相机被烧）。
 
+### B15. TPU-MLIR 量化环境搭建的坑（Docker / 国内网络）
+- **Docker Hub 太慢 + 国内镜像站失效**：直连 ~98KB/s；`docker.xuanyuan.me` 403、`docker.m.daocloud.io` 不在白名单。**解法：从算能国内 CDN 下打包镜像** `https://sophon-assets.sophon.cn/sophon-prod-s3/drive/25/04/15/16/tpuc_dev_v3.4.tar.gz`（2.12GB，~7~15MB/s），再 `docker load -i`。
+- **中断的镜像拉取会污染 Docker 内容存储**：`docker run` 报 `failed to extract layer ... content digest ... not found`（元数据引用了缺失/损坏的层）。**解法**：`docker rmi -f <img>` + `docker image prune -f` + 重新 `docker load`（先 prune 再 load 修复成功）。
+- **本机 Docker bridge 网络损坏**：`docker run` 报 `failed to add the host (veth..) <=> sandbox (veth..) pair interfaces: operation not supported`。**解法**：`docker run --network none`（量化离线无需网络）；临时需联网装包用 `--network host`。
+- **镜像不含 `tpu_mlir`**：需容器内 `pip install tpu_mlir -i <清华源>`；装完 `docker commit` 成新镜像（如 `tpuc_mlir:latest`）复用，避免每次重装。
+- **容器生成的文件属主是 root**：宿主改不动 → `docker run ... chown -R <uid>:<gid> /workspace`。
+- **三段式命令**：`model_transform.py` → `run_calibration.py`（需 ~100 张校准图）→ `model_deploy.py --quantize INT8 --processor cv181x`。
+- **实测**：`resnet18.onnx` → `resnet18_cv181x_int8_sym.cvimodel`（11.87MB），板上 `npu_hello` 前向 **22.77ms/帧≈43.9FPS**。
+
+### B16. 传统 CV 装甲板（实验12）：灯条长轴 / 中心估计的两个几何坑
+- **背景**：用通道差 + `minAreaRect` 找 LED 灯条，再配对估装甲板中心（`experiments/2026-09-29_12_armor_led/`）。
+- **坑1（长轴取错）**：灯条是**细长矩形**，其**对角线比长边更长**。若用"四点中最远的一对"当长轴端点，会取成对角线 → `length==width`（如 141.6/141.6），后续长宽比过滤全挂、`bars=0`。
+  **解决**：长轴取**最长的那条边**（相邻角点），长度/宽度取相邻边长。
+- **坑2（中心偏 ~10px）**：用灯条**长边**端点拼四边形时，`cv2.boxPoints` 返回的角点顺序会决定取到的是**内边还是外边**，左右灯条不一致 → 中心系统性偏 ~10px。
+  **解决**：用灯条**两条短边的中点**连成**中轴**，再取两灯条中轴端点四边形的**对角线交点**；合成集中心误差从 ~10px 降到 **0.34px**。
+- **教训**：几何量（长轴/中心）要按"物理意义"算，别用"数值最值"图省事；`boxPoints` 角点顺序不可依赖。
+
 ---
 
 ## C. 内存 / ION 认知（由困难衍生）
@@ -266,4 +283,6 @@ cd /root && /mnt/system/usr/bin/test_mmf 4 ; ls -la /root/*.jpg
   - **2026-09-26（晚）绿色检测（阶段1 感知）**：新增实验 `experiments/2026-09-26_06_hsv_green/`，PC 调阈值 + 上板 opencv-mobile 实时 HSV 检测，3 米外 ~20cm 绿目标稳定检出 `offset/area` 并存 BMP；新增 **B12**（HSV 标度/OpenCV5 geometry/imgcodecs 缺失→写 BMP/小目标 min_area）。
   - **2026-09-27（阶段2 启动）**：新增实验 `experiments/2026-09-26_09_npu_demo/`，**NPU 部署通路打通**——步骤1 底层 `cviruntime`（mobilenet 226FPS）、步骤2 高层 `TDL`（官方 YOLOv8n@640 INT8 检出 person、17.6FPS）。新增 **B13**（TDL 部署三坑：DSO 符号/隐藏原子符号/libcurl 版本错配）。
   - **2026-09-28（部署深化）**：新增实验 `experiments/2026-09-27_10_tdl_infer/`——**可复用推理层**（`mf/tdl.h` C 接口 + `mf_tdl.cpp`：相机/TDL检测/自绘框/RTSP），相机实时检测 + RTSP 叠加（`rtsp://10.222.2.1:554/h265`，H265，~16FPS）。新增 **B14**（`TDL_WrapImage` 指针语义导致 RTSP 花屏；瞬态取帧失败重启即恢复）。
+  - **2026-09-29（量化打通）**：新增实验 `experiments/2026-09-28_11_quantize/`——**TPU-MLIR 量化打通**：`resnet18.onnx` → `cv181x INT8 cvimodel`（11.87MB），板上 NPU 推理 43.9FPS。新增 **B15**（Docker 环境四坑：Hub 慢→算能 CDN 打包镜像；中断拉取污染内容存储；bridge 网络坏→`--network none`；镜像缺 tpu_mlir→容器内 pip+commit）。
   - **2026-09-26（晚）MSP 链路（阶段1 链路）**：新增实验 `experiments/2026-09-26_07_msp_link/`（纯 C，不依赖中间件）；实现 MSP v1 编解码/流式解析/串口/`offset→RC`。**无硬件自测法**：用 **PTY（`posix_openpt`）在同进程内模拟 FC** 做端到端收发（客户端↔模拟FC），验证 termios+分帧+校验，`selftest`+`pty` 均 OK。真串口 UART1@460800 待下位机。
+  - **2026-09-29（传统CV装甲板 S0+S1）**：新增实验 `experiments/2026-09-29_12_armor_led/`——**传统 CV 检测红/蓝 LED 灯条**（不依赖训练）。S0 用纯 PIL + 自解单应生成**透视梯形**合成图 21 张（含真值）；S1 用 **cv2** 实现 通道差→形态学→minAreaRect→同色松弛配对→四点四边形中心，合成集 **召回/精确 100%、中心误差 0.34px**。新增 **B16**（灯条长轴取错对角线；中心受 boxPoints 内外边影响偏 ~10px）。PC 用独立 venv 装 `opencv-python 5.0.0`（与板端 opencv-mobile 5.0.0 对齐）。

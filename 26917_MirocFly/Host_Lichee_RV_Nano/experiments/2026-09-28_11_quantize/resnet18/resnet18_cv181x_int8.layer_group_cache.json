@@ -1,0 +1,435 @@
+{
+  "opt": 2,
+  "total subfunc": 2,
+  "subfunc_0": {
+    "subfunc idx": 0,
+    "GroupLayer": [],
+    "GlobalLayer": [
+      {
+        "func_idx": 0,
+        "group_cost": 0,
+        "index": 0,
+        "loc": "input/relu/Relu_output_0_Relu_si8"
+      },
+      {
+        "func_idx": 1,
+        "group_cost": 0,
+        "index": 1,
+        "loc": "func.return"
+      }
+    ],
+    "CyclePrefixSum": [
+      {
+        "cycle_prefix_sum": 0,
+        "index": 0,
+        "prefix_end_idx": 0
+      },
+      {
+        "cycle_prefix_sum": 0,
+        "index": 1,
+        "prefix_end_idx": 1
+      }
+    ]
+  },
+  "subfunc_1": {
+    "subfunc idx": 1,
+    "GroupLayer": [
+      {
+        "base_group_idx": 0,
+        "start_idx": 0,
+        "end_idx": 1,
+        "func_start_idx": 0,
+        "func_end_idx": 1,
+        "group_cost": 1333404,
+        "index": 0,
+        "locs": [
+          "/relu/Relu_output_0_Relu",
+          "/maxpool/MaxPool_output_0_MaxPool"
+        ],
+        "shape_secs": [
+          1,
+          1,
+          1,
+          7,
+          1
+        ]
+      },
+      {
+        "base_group_idx": 0,
+        "start_idx": 3,
+        "end_idx": 4,
+        "func_start_idx": 3,
+        "func_end_idx": 4,
+        "group_cost": 985970,
+        "index": 2,
+        "locs": [
+          "/layer1/layer1.0/conv2/Conv_output_0_Conv",
+          "/layer1/layer1.0/relu_1/Relu_output_0_Relu"
+        ],
+        "shape_secs": [
+          1,
+          1,
+          1,
+          7,
+          1
+        ]
+      },
+      {
+        "base_group_idx": 0,
+        "start_idx": 6,
+        "end_idx": 7,
+        "func_start_idx": 6,
+        "func_end_idx": 7,
+        "group_cost": 985970,
+        "index": 4,
+        "locs": [
+          "/layer1/layer1.1/conv2/Conv_output_0_Conv",
+          "/layer1/layer1.1/relu_1/Relu_output_0_Relu"
+        ],
+        "shape_secs": [
+          1,
+          1,
+          1,
+          7,
+          1
+        ]
+      },
+      {
+        "base_group_idx": 0,
+        "start_idx": 10,
+        "end_idx": 11,
+        "func_start_idx": 10,
+        "func_end_idx": 11,
+        "group_cost": 962858,
+        "index": 7,
+        "locs": [
+          "/layer2/layer2.0/conv2/Conv_output_0_Conv",
+          "/layer2/layer2.0/relu_1/Relu_output_0_Relu"
+        ],
+        "shape_secs": [
+          1,
+          1,
+          1,
+          7,
+          1
+        ]
+      },
+      {
+        "base_group_idx": 0,
+        "start_idx": 13,
+        "end_idx": 14,
+        "func_start_idx": 13,
+        "func_end_idx": 14,
+        "group_cost": 962858,
+        "index": 9,
+        "locs": [
+          "/layer2/layer2.1/conv2/Conv_output_0_Conv",
+          "/layer2/layer2.1/relu_1/Relu_output_0_Relu"
+        ],
+        "shape_secs": [
+          1,
+          1,
+          1,
+          7,
+          1
+        ]
+      },
+      {
+        "base_group_idx": 0,
+        "start_idx": 28,
+        "end_idx": 29,
+        "func_start_idx": 28,
+        "func_end_idx": 29,
+        "group_cost": 24749,
+        "index": 23,
+        "locs": [
+          "/layer4/layer4.1/relu_1/Relu_output_0_Relu",
+          "/avgpool/GlobalAveragePool_output_0_GlobalAveragePool"
+        ],
+        "shape_secs": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      }
+    ],
+    "GlobalLayer": [
+      {
+        "index": 1,
+        "func_idx": 2,
+        "group_cost": 0,
+        "loc": "/layer1/layer1.0/relu/Relu_output_0_Relu"
+      },
+      {
+        "index": 3,
+        "func_idx": 5,
+        "group_cost": 0,
+        "loc": "/layer1/layer1.1/relu/Relu_output_0_Relu"
+      },
+      {
+        "index": 5,
+        "func_idx": 8,
+        "group_cost": 0,
+        "loc": "/layer2/layer2.0/downsample/downsample.0/Conv_output_0_Conv"
+      },
+      {
+        "index": 6,
+        "func_idx": 9,
+        "group_cost": 0,
+        "loc": "/layer2/layer2.0/relu/Relu_output_0_Relu"
+      },
+      {
+        "index": 8,
+        "func_idx": 12,
+        "group_cost": 0,
+        "loc": "/layer2/layer2.1/relu/Relu_output_0_Relu"
+      },
+      {
+        "index": 10,
+        "func_idx": 15,
+        "group_cost": 0,
+        "loc": "/layer3/layer3.0/downsample/downsample.0/Conv_output_0_Conv"
+      },
+      {
+        "index": 11,
+        "func_idx": 16,
+        "group_cost": 0,
+        "loc": "/layer3/layer3.0/relu/Relu_output_0_Relu"
+      },
+      {
+        "index": 12,
+        "func_idx": 17,
+        "group_cost": 0,
+        "loc": "/layer3/layer3.0/conv2/Conv_output_0_Conv"
+      },
+      {
+        "index": 13,
+        "func_idx": 18,
+        "group_cost": 0,
+        "loc": "/layer3/layer3.0/relu_1/Relu_output_0_Relu"
+      },
+      {
+        "index": 14,
+        "func_idx": 19,
+        "group_cost": 0,
+        "loc": "/layer3/layer3.1/relu/Relu_output_0_Relu"
+      },
+      {
+        "index": 15,
+        "func_idx": 20,
+        "group_cost": 0,
+        "loc": "/layer3/layer3.1/conv2/Conv_output_0_Conv"
+      },
+      {
+        "index": 16,
+        "func_idx": 21,
+        "group_cost": 0,
+        "loc": "/layer3/layer3.1/relu_1/Relu_output_0_Relu"
+      },
+      {
+        "index": 17,
+        "func_idx": 22,
+        "group_cost": 0,
+        "loc": "/layer4/layer4.0/downsample/downsample.0/Conv_output_0_Conv"
+      },
+      {
+        "index": 18,
+        "func_idx": 23,
+        "group_cost": 0,
+        "loc": "/layer4/layer4.0/relu/Relu_output_0_Relu"
+      },
+      {
+        "index": 19,
+        "func_idx": 24,
+        "group_cost": 0,
+        "loc": "/layer4/layer4.0/conv2/Conv_output_0_Conv"
+      },
+      {
+        "index": 20,
+        "func_idx": 25,
+        "group_cost": 0,
+        "loc": "/layer4/layer4.0/relu_1/Relu_output_0_Relu"
+      },
+      {
+        "index": 21,
+        "func_idx": 26,
+        "group_cost": 0,
+        "loc": "/layer4/layer4.1/relu/Relu_output_0_Relu"
+      },
+      {
+        "index": 22,
+        "func_idx": 27,
+        "group_cost": 0,
+        "loc": "/layer4/layer4.1/conv2/Conv_output_0_Conv"
+      },
+      {
+        "index": 24,
+        "func_idx": 30,
+        "group_cost": 0,
+        "loc": "/Flatten_output_0_Flatten"
+      },
+      {
+        "index": 25,
+        "func_idx": 31,
+        "group_cost": 0,
+        "loc": "output_Gemm"
+      },
+      {
+        "index": 26,
+        "func_idx": 32,
+        "group_cost": 0,
+        "loc": "output_Gemm_f32"
+      },
+      {
+        "index": 27,
+        "func_idx": 33,
+        "group_cost": 0,
+        "loc": "func.return"
+      }
+    ],
+    "CyclePrefixSum": [
+      {
+        "index": 0,
+        "prefix_end_idx": 1,
+        "cycle_prefix_sum": 1333404
+      },
+      {
+        "index": 1,
+        "prefix_end_idx": 2,
+        "cycle_prefix_sum": 1333404
+      },
+      {
+        "index": 2,
+        "prefix_end_idx": 4,
+        "cycle_prefix_sum": 2319374
+      },
+      {
+        "index": 3,
+        "prefix_end_idx": 5,
+        "cycle_prefix_sum": 2319374
+      },
+      {
+        "index": 4,
+        "prefix_end_idx": 7,
+        "cycle_prefix_sum": 3305344
+      },
+      {
+        "index": 5,
+        "prefix_end_idx": 8,
+        "cycle_prefix_sum": 3305344
+      },
+      {
+        "index": 6,
+        "prefix_end_idx": 9,
+        "cycle_prefix_sum": 3305344
+      },
+      {
+        "index": 7,
+        "prefix_end_idx": 11,
+        "cycle_prefix_sum": 4268202
+      },
+      {
+        "index": 8,
+        "prefix_end_idx": 12,
+        "cycle_prefix_sum": 4268202
+      },
+      {
+        "index": 9,
+        "prefix_end_idx": 14,
+        "cycle_prefix_sum": 5231060
+      },
+      {
+        "index": 10,
+        "prefix_end_idx": 15,
+        "cycle_prefix_sum": 5231060
+      },
+      {
+        "index": 11,
+        "prefix_end_idx": 16,
+        "cycle_prefix_sum": 5231060
+      },
+      {
+        "index": 12,
+        "prefix_end_idx": 17,
+        "cycle_prefix_sum": 5231060
+      },
+      {
+        "index": 13,
+        "prefix_end_idx": 18,
+        "cycle_prefix_sum": 5231060
+      },
+      {
+        "index": 14,
+        "prefix_end_idx": 19,
+        "cycle_prefix_sum": 5231060
+      },
+      {
+        "index": 15,
+        "prefix_end_idx": 20,
+        "cycle_prefix_sum": 5231060
+      },
+      {
+        "index": 16,
+        "prefix_end_idx": 21,
+        "cycle_prefix_sum": 5231060
+      },
+      {
+        "index": 17,
+        "prefix_end_idx": 22,
+        "cycle_prefix_sum": 5231060
+      },
+      {
+        "index": 18,
+        "prefix_end_idx": 23,
+        "cycle_prefix_sum": 5231060
+      },
+      {
+        "index": 19,
+        "prefix_end_idx": 24,
+        "cycle_prefix_sum": 5231060
+      },
+      {
+        "index": 20,
+        "prefix_end_idx": 25,
+        "cycle_prefix_sum": 5231060
+      },
+      {
+        "index": 21,
+        "prefix_end_idx": 26,
+        "cycle_prefix_sum": 5231060
+      },
+      {
+        "index": 22,
+        "prefix_end_idx": 27,
+        "cycle_prefix_sum": 5231060
+      },
+      {
+        "index": 23,
+        "prefix_end_idx": 29,
+        "cycle_prefix_sum": 5255809
+      },
+      {
+        "index": 24,
+        "prefix_end_idx": 30,
+        "cycle_prefix_sum": 5255809
+      },
+      {
+        "index": 25,
+        "prefix_end_idx": 31,
+        "cycle_prefix_sum": 5255809
+      },
+      {
+        "index": 26,
+        "prefix_end_idx": 32,
+        "cycle_prefix_sum": 5255809
+      },
+      {
+        "index": 27,
+        "prefix_end_idx": 33,
+        "cycle_prefix_sum": 5255809
+      }
+    ]
+  }
+}

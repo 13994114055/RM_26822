@@ -73,7 +73,9 @@ Host_Lichee_RV_Nano/
 │   ├── 2026-09-26_07_msp_link/             # ✅MSP 链路 (msp.c/msp_test; SET_RAW_RC+RAW_IMU, offset→RC; PTY 自测)
 │   ├── 2026-09-26_08_vision_control/       # ✅识别绿色并飞过去 (green_fly; 检测+MSP 闭环; PTY/真串口)
 │   ├── 2026-09-26_09_npu_demo/             # ✅NPU 部署 (npu_hello 底层 cviruntime; tdl_detect 高层 TDL 检测)
-│   └── 2026-09-27_10_tdl_infer/            # ✅可复用推理层 (mf/tdl.h; 相机+检测+画框+RTSP)
+│   ├── 2026-09-27_10_tdl_infer/            # ✅可复用推理层 (mf/tdl.h; 相机+检测+画框+RTSP)
+│   ├── 2026-09-28_11_quantize/             # ✅TPU-MLIR 量化 (ONNX→cv181x INT8 cvimodel)
+│   └── 2026-09-29_12_armor_led/            # 🟡传统CV装甲板 (红/蓝LED, 通道差+几何配对; PC cv2 原型)
 ├── board_libs/                             # 板上 scpcom .so 链接副本 (gitignore; fetch_board_libs.sh)
 ├── LicheeSG-Nano-Build_scpcom/             # scpcom 源码树(中间件/样例/tdl_sdk)
 └── LicheeRV-Nano-Build_official/           # 官方工具链 + 内核头
@@ -91,6 +93,9 @@ Host_Lichee_RV_Nano/
 - **`experiments/2026-09-26_08_vision_control/`（✅识别绿色并飞过去）**：06 检测 + 07 链路合成。`green_fly`：检测 offset → `msp_offset_to_rc` → `SET_RAW_RC`；默认 **PTY 假 FC**（无硬件可跑），给串口参数即注入真 FC。安全：无目标回中、油门默认 1000。
 - **`experiments/2026-09-26_09_npu_demo/`（✅NPU 部署入门）**：步骤1 `npu_hello` 底层 **cviruntime**（mobilenet 226 FPS）；步骤2 `tdl_detect` 高层 **TDL** 图片检测（官方 `yolov8n_det_coco80_640` INT8，**17.6 FPS**）；步骤3 `vi_detect` **相机实时检测**（TDL 内部 VI，1280×720，**16.4 FPS**）。链接：需链 `board_libs` + `-lgcc_s`；**不链 `-ltdl_ex`**（拉 libcurl，板上 libssl 不匹配，见 B13）；编译 `sample_utils.cpp` 还需 nlohmann/json + OpenCV 头。运行需 `LD_LIBRARY_PATH` 含 `/mnt/system/usr/lib:/mnt/system/usr/lib/3rd:/mnt/system/lib:/usr/bin/lib:/maixapp/lib:/mnt/system/opt/cvitek_tpu_sdk/lib`。
 - **`experiments/2026-09-27_10_tdl_infer/`（✅可复用推理层）**：`include/mf/tdl.h`(C 接口) + `src/mf_tdl.cpp`（相机/TDL检测/自绘框/RTSP）。`tdl_app` 相机实时检测 + 画框 + RTSP 叠加：`rtsp://10.222.2.1:554/h265`（**H265** 1280×720，~16 FPS）。**坑见 B14**：`TDL_WrapImage` 传**帧指针**（`VIDEO_FRAME_INFO_S *frame=NULL; TDL_WrapImage(image,&frame)`），传结构体会导致 RTSP 花屏。
+- **`experiments/2026-09-28_11_quantize/`（✅TPU-MLIR 量化）**：**在 Linux i5** 上用 TPU-MLIR docker 把 ONNX 量化成 cv181x INT8 `cvimodel`。环境：镜像走**算能国内 CDN**（`tpuc_dev_v3.4.tar.gz` 2.12GB）→ `docker load`；容器内 `pip install tpu_mlir` 后 commit。三段式：`model_transform.py → run_calibration.py → model_deploy.py --quantize INT8 --processor cv181x`。实测 `resnet18`→cvimodel，板上 `npu_hello` **43.9 FPS**。**坑见 B15**（Docker Hub 慢/内容存储被中断拉取污染/bridge 网络坏用 `--network none`/镜像缺 tpu_mlir）。
+- **`experiments/2026-09-29_12_armor_led/`（🟡传统CV装甲板 S0+S1）**：不依赖训练的**并行兜底/预研**。S0 `pc_tune/gen_synth_armor.py`（**纯 PIL** + 自解 8×8 单应）生成**透视梯形**合成图 21 张 + 真值 `synth_armor/labels.csv`；S1 `pc_tune/detect_armor.py`（**cv2**；PC 独立 venv `~/.venvs/mirocfly` 装 `opencv-python 5.0.0`，**与板端 opencv-mobile 5.0.0 对齐**）：通道差(`红=R−max(G,B)`/`蓝=B−max(R,G)`)→形态学→`minAreaRect`→同色**松弛配对**→**四点四边形对角线交点**为中心。合成集 **召回/精确 100%、中心误差 0.34px**。坑见 B16。S2 板端移植待做。
+- **面试复盘**：`interview_notes.md`（按阶段 Q&A）+ `edge_ai_cheatsheet.md`（速查）。
 - **实验 01/02/03（旧/存档）**：低层 MMF、sipeed 链、Form A 首次实验，均不再作为正解。
 - `sensor_cfg.ini`：GC4653 **beta**（= 板默认）；由镜像 `/etc/init.d/S02config` 选 alpha/beta + 设 pinmux。
 - **工具链**：`LicheeRV-Nano-Build_official/host-tools/gcc/riscv64-linux-musl-x86_64/`。
