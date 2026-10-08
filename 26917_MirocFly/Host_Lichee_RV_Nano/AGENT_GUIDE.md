@@ -16,9 +16,11 @@ LicheeRV Nano (SG2002) —— Linux视觉层: 采集→识别→目标选择→�
         │  近期: MSP (SET_RAW_RC 注入 + RAW_IMU/ATTITUDE/STATUS 回读)
         │  远期: 0xAA 0x55 | X:int16 | Y:int16 | Area:uint16 | Status:uint8 | CRC8
         ▼
-下位机 —— 近期: INAV(黑盒稳定器)  远期: 自研飞控
-（⚠️ 下位机硬件已更替：原 AT32 直驱空心杯升力不足（59g<76g）→ 改无刷电机 +
-   自带无刷驱动的主控；接口约定不变。详见 Low_MCU/archive_at32/agent_at32.md）
+下位机 BetaFPV G473 (STM32G474) —— 近期: INAV 10.0.0(自移植, 已能飞)  远期: 自研飞控
+（⚠️ 下位机硬件已更替：原 AT32 直驱空心杯升力不足（59g<76g）→ 新主控 BetaFPV G473
+   (STM32G474)，与烧毁的同款已重购；自移植 INAV 10.0.0(G4) 能飞，但"尚未本土化"
+   —— 上位机 MSP / 光流 / 接口映射未定，旧接口约定不再默认成立。
+   详见 Low_MCU/new_mcu/README.md）
 ```
 
 **关键接口抽象**：上位机内部统一产出 `TargetInfo{像素偏移X, 像素偏移Y, 面积Area(∝1/距离²), 状态Status}`，链路层只换"编码器"（近期 MSP 摇杆值 / 远期自定义帧）。**上层任务逻辑两阶段零改动，且下位机主控更替也不影响上位机。**
@@ -28,9 +30,9 @@ LicheeRV Nano (SG2002) —— Linux视觉层: 采集→识别→目标选择→�
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | **0 相机出帧** | 交叉编译取帧程序 → CSI 抓帧存 NV21；获 `VIDEO_FRAME_INFO_S` | 🟢 **打通（Form A：`experiments/…/04_vision_module`）**；`05_rtsp_stream` RTSP 预览通 |
-| **1 绿色荧光（过渡）** | HSV 检测荧光绿 → 多目标选择 → 像素偏移→摇杆修正（ANGLE）→ MSP 注入 INAV | 🟡 **检测(06)+链路(07)已通，闭环程序(08)已写**；真机联调待下位机 |
+| **1 绿色荧光（过渡）** | HSV 检测荧光绿 → 多目标选择 → 像素偏移→摇杆修正（ANGLE）→ MSP 注入 INAV | 🟡 **检测(06)+链路(07)已通，闭环程序(08)已写**；真机联调待下位机（G473）**对接/本土化** |
 | **2 不规则物体（最终）** | YOLOv8n 自训 → INT8 cvimodel → TDL SDK 部署 NPU → 撞击 → 自稳 → 30s 返航 | 🟡 **NPU 部署通路已通**（09：官方 YOLOv8n INT8 检测 17.6 FPS）；自训/量化待做 |
-| **3 自写固件（远期）** | 下位机自研飞控（原 AT32 计划，现随下位机更替而变） | ⏳ 远期 |
+| **3 自写固件（远期）** | 下位机自研飞控（原 AT32 计划；新主控 G473 已重购、INAV G4 能飞，待对接后再推进） | ⏳ 远期 |
 
 **阶段 0 结论（重要，已更正）**：
 - ✅ **相机硬件正常**（模组/排线/传感器都没坏）。
@@ -51,7 +53,7 @@ LicheeRV Nano (SG2002) —— Linux视觉层: 采集→识别→目标选择→�
 
 ## 5. 通信协议要点（近期 MSP）
 
-- 下位机 INAV **串口只支持 MSP**（已确认；板上 INAV 9.0.0）。
+- 下位机 INAV **串口只支持 MSP**（已确认；新板固件为自移植 INAV 10.0.0 / STM32G4）。
 - 注入：`MSP_SET_RAW_RC`(200)，≥5Hz，推荐 10Hz。
 - 回读：`MSP_RAW_IMU`(102, 撞击检测)、`MSP_ATTITUDE`(108)、`MSP_RX_MAP`、`MSP2_INAV_STATUS`、`MSP2_INAV_ESTIMATED_POSITION`（光流位置）。
 - **RC 优先**：INAV `MSP RC Override` 飞行模式（9.0.0 默认启用）+ `msp_override_channels`=AETR；飞行员拨杆切换。

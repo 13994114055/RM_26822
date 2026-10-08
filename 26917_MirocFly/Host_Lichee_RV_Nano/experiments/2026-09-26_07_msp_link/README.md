@@ -4,7 +4,8 @@
 把视觉 `TargetInfo{offsetX,offsetY,area}` 映射为 RC 摇杆值，为「视觉→控制闭环」铺路。
 
 **结果**：✅ 编解码/CRC 与端到端收发自测通过（无硬件，用 PTY 模拟 FC）。
-**下位机未到**：真串口（UART1@460800）待新主控到位后联调。
+**下位机状态**：新主控 **BetaFPV G473（STM32G474）** 已重购、**INAV 10.0.0（自移植 G4）能飞**，但**尚未本土化**（未对接上位机 MSP、未适配光流、**接口/UART 映射未定**）。
+**真串口联调**：待下位机对接后进行；下面命令里的 `UART1@460800` 是 **AT32 阶段历史约定**，**新板需按实际映射/BSP 确认后再用**。
 
 ## 目录
 ```
@@ -33,7 +34,7 @@ ssh root@10.222.2.1 'cd /root/mirocfly && ./msp_test'      # selftest+pty+demo
 ./msp_test pty          # PTY 模拟 FC: 发 SET_RAW_RC, 收 RAW_IMU
 ./msp_test demo         # 打印 offset->RC 映射
 ```
-真硬件（FC 到位后）：
+真硬件（FC 对接后；`/dev/ttySx` 与波特率按新板实际映射确认）：
 ```bash
 ./msp_test monitor /dev/ttyS1 460800   # 被动解析 FC 发来的 MSP
 ./msp_test inject  /dev/ttyS1 460800 10 # 10Hz 注入 SET_RAW_RC(演示画圆)
@@ -47,4 +48,5 @@ ssh root@10.222.2.1 'cd /root/mirocfly && ./msp_test'      # selftest+pty+demo
 - `offset->RC` 的 **pitch 正负与 INAV ANGLE 约定需实机确认**（当前 `roll=1500+kp·offx`、`pitch=1500-kp·offy`）。
 
 ## 下一步（闭环）
-FC 到位后：`green_detect` 的 offset → `msp_offset_to_rc` → `msp_send_set_raw_rc`，10Hz 注入；拔桨→绑绳→短飞逐步验证。
+FC 对接后：`green_detect` 的 offset → `msp_offset_to_rc` → `msp_send_set_raw_rc`，10Hz 注入；拔桨→绑绳→短飞逐步验证。
+> 下位机侧还需配置 INAV 的 `MSP RC Override`（`BOX_MSP_RC_OVERRIDE` + `msp_override_channels`）才能让上位机接管。

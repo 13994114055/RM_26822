@@ -1,0 +1,5262 @@
+diff --git a/cmake/at32.cmake b/cmake/at32.cmake
+index bd6f1e281..4a334558b 100644
+--- a/cmake/at32.cmake
++++ b/cmake/at32.cmake
+@@ -186,7 +186,6 @@ endfunction()
+ 
+ function(add_hex_target name exe hex)
+     add_custom_target(${name} ALL
+-        cmake -E env PATH="$ENV{PATH}"
+         # TODO: Overriding the start address with --set-start 0x08000000
+         # seems to be required due to some incorrect assumptions about .hex
+         # files in the configurator. Verify wether that's the case and fix
+@@ -198,7 +197,6 @@ endfunction()
+ 
+ function(add_bin_target name exe bin)
+     add_custom_target(${name}
+-        cmake -E env PATH="$ENV{PATH}"
+         ${CMAKE_OBJCOPY} -Obinary $<TARGET_FILE:${exe}> ${bin}
+         BYPRODUCTS ${bin}
+     )
+diff --git a/cmake/main.cmake b/cmake/main.cmake
+index 4bfc81427..9c6b69815 100644
+--- a/cmake/main.cmake
++++ b/cmake/main.cmake
+@@ -85,7 +85,11 @@ function(setup_executable exe name)
+     set_target_properties(${exe} PROPERTIES
+         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+     )
+-    if(IS_RELEASE_BUILD AND NOT (CMAKE_HOST_APPLE AND SITL))
++    if(STM32G4_BUILD)
++        set_target_properties(${exe} PROPERTIES
++            INTERPROCEDURAL_OPTIMIZATION OFF
++        )
++    elseif(IS_RELEASE_BUILD AND NOT (CMAKE_HOST_APPLE AND SITL))
+         set_target_properties(${exe} PROPERTIES
+             INTERPROCEDURAL_OPTIMIZATION ON
+         )
+diff --git a/cmake/settings.cmake b/cmake/settings.cmake
+index 979b5e172..fec0a9874 100644
+--- a/cmake/settings.cmake
++++ b/cmake/settings.cmake
+@@ -12,6 +12,13 @@ function(enable_settings exe name)
+     get_target_property(includes ${exe} INCLUDE_DIRECTORIES)
+     list(TRANSFORM includes PREPEND "-I")
+     get_target_property(defs ${exe} COMPILE_DEFINITIONS)
++    set(filtered_defs "")
++    foreach(def IN LISTS defs)
++        if(NOT def MATCHES "^(FC_VERSION_TYPE|__REVISION__|__TARGET__)=")
++            list(APPEND filtered_defs "${def}")
++        endif()
++    endforeach()
++    set(defs ${filtered_defs})
+     list(TRANSFORM defs PREPEND "-D")
+     list(APPEND cflags ${options})
+     list(APPEND cflags ${includes})
+@@ -41,9 +48,9 @@ function(enable_settings exe name)
+     add_custom_command(
+         OUTPUT ${output}
+         COMMAND
+-            ${CMAKE_COMMAND} -E env CFLAGS="${cflags}" TARGET=${name} PATH="$ENV{PATH}" SETTINGS_CXX=${args_SETTINGS_CXX}
++            ${CMAKE_COMMAND} -E env CFLAGS="${cflags}" TARGET=${name} SETTINGS_CXX=${args_SETTINGS_CXX}
+             ${RUBY_EXECUTABLE} ${SETTINGS_GENERATOR} ${MAIN_DIR} ${SETTINGS_FILE} -o "${dir}" ${USE_HOST_GCC} 
+-        DEPENDS ${SETTINGS_GENERATOR} ${SETTINGS_FILE}
++        DEPENDS ${SETTINGS_GENERATOR} ${SETTINGS_FILE} ${CMAKE_CURRENT_SOURCE_DIR}/target.h
+     )
+     set(${args_OUTPUTS} ${output} PARENT_SCOPE)
+ endfunction()
+diff --git a/cmake/stm32.cmake b/cmake/stm32.cmake
+index 39454864c..06cf0e168 100644
+--- a/cmake/stm32.cmake
++++ b/cmake/stm32.cmake
+@@ -1,5 +1,6 @@
+ include(stm32-bootloader)
+ include(stm32f4)
++include(stm32g4)
+ include(stm32f7)
+ include(stm32h7)
+ 
+@@ -193,9 +194,7 @@ function(get_stm32_flash_size out size)
+ endfunction()
+ 
+ function(add_hex_target name exe hex)
+-    add_custom_target(${name} ALL
+-        cmake -E env PATH="$ENV{PATH}"
+-        # TODO: Overriding the start address with --set-start 0x08000000
++    add_custom_target(${name} ALL        # TODO: Overriding the start address with --set-start 0x08000000
+         # seems to be required due to some incorrect assumptions about .hex
+         # files in the configurator. Verify wether that's the case and fix
+         # the bug in configurator or delete this comment.
+@@ -205,9 +204,7 @@ function(add_hex_target name exe hex)
+ endfunction()
+ 
+ function(add_bin_target name exe bin)
+-    add_custom_target(${name}
+-        cmake -E env PATH="$ENV{PATH}"
+-        ${CMAKE_OBJCOPY} -Obinary $<TARGET_FILE:${exe}> ${bin}
++    add_custom_target(${name}        ${CMAKE_OBJCOPY} -Obinary $<TARGET_FILE:${exe}> ${bin}
+         BYPRODUCTS ${bin}
+     )
+ endfunction()
+diff --git a/cmake/stm32g4-usb.cmake b/cmake/stm32g4-usb.cmake
+new file mode 100644
+index 000000000..ab5822359
+--- /dev/null
++++ b/cmake/stm32g4-usb.cmake
+@@ -0,0 +1,40 @@
++set(STM32G4_USBCORE_DIR "${MAIN_LIB_DIR}/main/STM32G4/Middlewares/ST/STM32_USB_Device_Library/Core")
++set(STM32G4_USBCORE_SRC
++    usbd_core.c
++    usbd_ctlreq.c
++    usbd_ioreq.c
++)
++list(TRANSFORM STM32G4_USBCORE_SRC PREPEND "${STM32G4_USBCORE_DIR}/Src/")
++
++set(STM32G4_USBCDC_DIR "${MAIN_LIB_DIR}/main/STM32G4/Middlewares/ST/STM32_USB_Device_Library/Class/CDC")
++set(STM32G4_USBCDC_SRC
++    usbd_cdc.c
++)
++list(TRANSFORM STM32G4_USBCDC_SRC PREPEND "${STM32G4_USBCDC_DIR}/Src/")
++
++set(STM32G4_USBHID_DIR "${MAIN_LIB_DIR}/main/STM32G4/Middlewares/ST/STM32_USB_Device_Library/Class/HID")
++set(STM32G4_USBHID_SRC
++    usbd_hid.c
++)
++list(TRANSFORM STM32G4_USBHID_SRC PREPEND "${STM32G4_USBHID_DIR}/Src/")
++
++set(STM32G4_USBMSC_DIR "${MAIN_LIB_DIR}/main/STM32G4/Middlewares/ST/STM32_USB_Device_Library/Class/MSC")
++set(STM32G4_USBMSC_SRC
++    usbd_msc.c
++    usbd_msc_bot.c
++    usbd_msc_data.c
++    usbd_msc_scsi.c
++)
++list(TRANSFORM STM32G4_USBMSC_SRC PREPEND "${STM32G4_USBMSC_DIR}/Src/")
++
++set(STM32G4_USB_INCLUDE_DIRS
++    "${STM32G4_USBCORE_DIR}/Inc"
++    "${STM32G4_USBCDC_DIR}/Inc"
++    "${STM32G4_USBHID_DIR}/Inc"
++    "${STM32G4_USBMSC_DIR}/Inc"
++)
++
++list(APPEND STM32G4_USB_SRC ${STM32G4_USBCORE_SRC})
++list(APPEND STM32G4_USB_SRC ${STM32G4_USBCDC_SRC})
++list(APPEND STM32G4_USB_SRC ${STM32G4_USBHID_SRC})
++list(APPEND STM32G4_USB_SRC ${STM32G4_USBMSC_SRC})
+\ No newline at end of file
+diff --git a/cmake/stm32g4.cmake b/cmake/stm32g4.cmake
+new file mode 100644
+index 000000000..e7f7e1b57
+--- /dev/null
++++ b/cmake/stm32g4.cmake
+@@ -0,0 +1,117 @@
++include(cortex-m4f)
++include(stm32g4-usb)
++
++set(STM32G4_HAL_DIR "${MAIN_LIB_DIR}/main/STM32G4/Drivers/STM32G4xx_HAL_Driver")
++set(STM32G4_CMSIS_DEVICE_DIR "${MAIN_LIB_DIR}/main/STM32G4/Drivers/CMSIS/Device/ST/STM32G4xx")
++
++set(STM32G4_HAL_SRC
++    stm32g4xx_hal.c
++    stm32g4xx_hal_adc.c
++    stm32g4xx_hal_adc_ex.c
++    stm32g4xx_hal_cortex.c
++    stm32g4xx_hal_dma.c
++    stm32g4xx_hal_exti.c
++    stm32g4xx_hal_flash.c
++    stm32g4xx_hal_flash_ex.c
++    stm32g4xx_hal_gpio.c
++    stm32g4xx_hal_i2c.c
++    stm32g4xx_hal_i2c_ex.c
++    stm32g4xx_hal_pcd.c
++    stm32g4xx_hal_pcd_ex.c
++    stm32g4xx_hal_pwr.c
++    stm32g4xx_hal_pwr_ex.c
++    stm32g4xx_hal_rcc.c
++    stm32g4xx_hal_rcc_ex.c
++    stm32g4xx_hal_rtc.c
++    stm32g4xx_hal_rtc_ex.c
++    stm32g4xx_hal_spi.c
++    stm32g4xx_hal_tim.c
++    stm32g4xx_hal_tim_ex.c
++    stm32g4xx_hal_uart.c
++    stm32g4xx_hal_usart.c
++    stm32g4xx_ll_dma.c
++    stm32g4xx_ll_gpio.c
++    stm32g4xx_ll_rcc.c
++    stm32g4xx_ll_spi.c
++    stm32g4xx_ll_tim.c
++    stm32g4xx_ll_usb.c
++    stm32g4xx_ll_utils.c
++)
++list(TRANSFORM STM32G4_HAL_SRC PREPEND "${STM32G4_HAL_DIR}/Src/")
++
++set(STM32G4_VCP_DIR "${MAIN_SRC_DIR}/vcp_hal")
++set(STM32G4_VCP_SRC
++    usbd_desc.c
++    usbd_conf_stm32g4xx.c
++    usbd_cdc_interface.c
++)
++list(TRANSFORM STM32G4_VCP_SRC PREPEND "${STM32G4_VCP_DIR}/")
++set(STM32G4_INCLUDE_DIRS
++    "${STM32G4_HAL_DIR}/Inc"
++    "${STM32G4_CMSIS_DEVICE_DIR}/Include"
++    "${MAIN_SRC_DIR}/startup"
++)
++
++main_sources(STM32G4_SRC
++    target/system_stm32g4xx.c
++
++    config/config_streamer_stm32g4.c
++    config/config_streamer_ram.c
++    config/config_streamer_extflash.c
++
++    drivers/adc_stm32g4xx.c
++    drivers/bus_i2c_hal.c
++    drivers/dma_stm32g4xx.c
++    drivers/bus_spi_hal_ll.c
++    drivers/timer.c
++    drivers/timer_impl_hal.c
++    drivers/timer_stm32g4xx.c
++    drivers/system_stm32g4xx.c
++    drivers/serial_uart_stm32g4xx.c
++    drivers/serial_uart_hal.c
++    drivers/cmsis_dsp_stubs.c
++)
++
++main_sources(STM32G4_MSC_SRC
++    drivers/usb_msc_f7xx.c
++)
++
++set(STM32G4_DEFINITIONS
++    ${CORTEX_M4F_DEFINITIONS}
++    STM32G4
++    USE_HAL_DRIVER
++    USE_FULL_LL_DRIVER
++)
++
++function(target_stm32g4xx)
++    set(STM32G4_BUILD ON)
++    set(CMSIS_DSP_SRC "")
++    target_stm32(
++        SOURCES ${STM32G4_HAL_SRC} ${STM32G4_SRC}
++        COMPILE_DEFINITIONS ${STM32G4_DEFINITIONS}
++        COMPILE_OPTIONS ${CORTEX_M4F_COMMON_OPTIONS} ${CORTEX_M4F_COMPILE_OPTIONS}
++        SYSTEM_INCLUDE_DIRECTORIES ${STM32G4_INCLUDE_DIRS}
++        LINK_OPTIONS ${CORTEX_M4F_COMMON_OPTIONS} ${CORTEX_M4F_LINK_OPTIONS}
++
++        MSC_SOURCES ${STM32G4_USBMSC_SRC} ${STM32G4_MSC_SRC}
++        VCP_SOURCES ${STM32G4_USB_SRC} ${STM32G4_VCP_SRC}
++        VCP_INCLUDE_DIRECTORIES ${STM32G4_USB_INCLUDE_DIRS} ${STM32G4_VCP_DIR}
++
++        OPENOCD_TARGET stm32g4x
++        DISABLE_MSC
++        OPTIMIZATION -Os
++
++        ${ARGN}
++    )
++endfunction()
++
++function(target_stm32g474xg name)
++    target_stm32g4xx(
++        NAME ${name}
++        STARTUP startup_stm32g474xx.s
++        COMPILE_DEFINITIONS STM32G474xx MCU_FLASH_SIZE=512 MCU_RAM_SIZE=128
++        LINKER_SCRIPT stm32_flash_g474xg
++        SVD STM32G474
++        ${ARGN}
++    )
++endfunction()
+\ No newline at end of file
+diff --git a/src/main/config/config_streamer.h b/src/main/config/config_streamer.h
+index 2c13a975d..ca3ff19bd 100644
+--- a/src/main/config/config_streamer.h
++++ b/src/main/config/config_streamer.h
+@@ -5,14 +5,6 @@
+  * it under the terms of the GNU General Public License as published by
+  * the Free Software Foundation, either version 3 of the License, or
+  * (at your option) any later version.
+- *
+- * Cleanflight is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU General Public License for more details.
+- *
+- * You should have received a copy of the GNU General Public License
+- * along with Cleanflight.  If not, see <http://www.gnu.org/licenses/>.
+  */
+ 
+ #pragma once
+@@ -22,18 +14,21 @@
+ 
+ #include "drivers/flash_m25p16.h"
+ 
+-// Streams data out to the EEPROM, padding to the write size as
+-// needed, and updating the checksum as it goes.
+-
+ #ifdef CONFIG_IN_EXTERNAL_FLASH
+-#define CONFIG_STREAMER_BUFFER_SIZE M25P16_PAGESIZE // Must match flash device page size
++#define CONFIG_STREAMER_BUFFER_SIZE M25P16_PAGESIZE
+ #elif defined(STM32H7)
+-#define CONFIG_STREAMER_BUFFER_SIZE (FLASH_NB_32BITWORD_IN_FLASHWORD * 4) // Flash word = 256-bits or 128bits, depending on the mcu
++#define CONFIG_STREAMER_BUFFER_SIZE (FLASH_NB_32BITWORD_IN_FLASHWORD * 4)
++#elif defined(STM32G4)
++#define CONFIG_STREAMER_BUFFER_SIZE 8
+ #else
+ #define CONFIG_STREAMER_BUFFER_SIZE 4
+ #endif
+ 
++#if defined(STM32H7) || defined(STM32G4)
++typedef uint64_t config_streamer_buffer_align_type_t;
++#else
+ typedef uint32_t config_streamer_buffer_align_type_t;
++#endif
+ 
+ typedef struct config_streamer_s {
+     uintptr_t address;
+@@ -49,14 +44,12 @@ typedef struct config_streamer_s {
+ } config_streamer_t;
+ 
+ void config_streamer_init(config_streamer_t *c);
+-
+ void config_streamer_start(config_streamer_t *c, uintptr_t base, int size);
+ int config_streamer_write(config_streamer_t *c, const uint8_t *p, uint32_t size);
+ int config_streamer_flush(config_streamer_t *c);
+-
+ int config_streamer_finish(config_streamer_t *c);
+ int config_streamer_status(config_streamer_t *c);
+ 
+ #if defined(CONFIG_IN_FILE)
+-bool configFileSetPath(char* path);
++bool configFileSetPath(char *path);
+ #endif
+\ No newline at end of file
+diff --git a/src/main/config/config_streamer_stm32g4.c b/src/main/config/config_streamer_stm32g4.c
+new file mode 100644
+index 000000000..08fa05490
+--- /dev/null
++++ b/src/main/config/config_streamer_stm32g4.c
+@@ -0,0 +1,52 @@
++/*
++ * Internal flash configuration streamer for STM32G4.
++ */
++
++#include <string.h>
++
++#include "platform.h"
++#include "drivers/system.h"
++#include "config/config_streamer.h"
++
++#if defined(STM32G4) && !defined(CONFIG_IN_RAM) && !defined(CONFIG_IN_EXTERNAL_FLASH)
++
++void config_streamer_impl_unlock(void)
++{
++    HAL_FLASH_Unlock();
++}
++
++void config_streamer_impl_lock(void)
++{
++    HAL_FLASH_Lock();
++}
++
++int config_streamer_impl_write_word(config_streamer_t *c, config_streamer_buffer_align_type_t *buffer)
++{
++    if (c->err != 0) {
++        return c->err;
++    }
++
++    if ((c->address % FLASH_PAGE_SIZE) == 0) {
++        uint32_t page = (c->address - FLASH_BASE) / FLASH_PAGE_SIZE;
++        FLASH_EraseInitTypeDef erase = {
++            .TypeErase = FLASH_TYPEERASE_PAGES,
++            .Banks = FLASH_BANK_1,
++            .Page = page,
++            .NbPages = 1,
++        };
++        uint32_t pageError = 0;
++
++        if (HAL_FLASHEx_Erase(&erase, &pageError) != HAL_OK) {
++            return -1;
++        }
++    }
++
++    if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD, c->address, (uint64_t)*buffer) != HAL_OK) {
++        return -2;
++    }
++
++    c->address += CONFIG_STREAMER_BUFFER_SIZE;
++    return 0;
++}
++
++#endif
+\ No newline at end of file
+diff --git a/src/main/drivers/adc_impl.h b/src/main/drivers/adc_impl.h
+index 32f4414e8..ada1fb667 100644
+--- a/src/main/drivers/adc_impl.h
++++ b/src/main/drivers/adc_impl.h
+@@ -1,18 +1,9 @@
+ /*
+  * This file is part of Cleanflight.
+- *
+  * Cleanflight is free software: you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+  * the Free Software Foundation, either version 3 of the License, or
+  * (at your option) any later version.
+- *
+- * Cleanflight is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU General Public License for more details.
+- *
+- * You should have received a copy of the GNU General Public License
+- * along with Cleanflight.  If not, see <http://www.gnu.org/licenses/>.
+  */
+ 
+ #pragma once
+@@ -20,7 +11,9 @@
+ #include "drivers/io_types.h"
+ #include "rcc_types.h"
+ 
+-#if defined(STM32F4) || defined(STM32F7) || defined(AT32F43x) 
++#if defined(STM32F4) || defined(STM32F7) || defined(AT32F43x)
++#define ADC_TAG_MAP_COUNT 16
++#elif defined(STM32G4)
+ #define ADC_TAG_MAP_COUNT 16
+ #elif defined(STM32H7)
+ #define ADC_TAG_MAP_COUNT 28
+@@ -31,12 +24,12 @@
+ #if defined(STM32H7)
+ #define ADC_VALUES_ALIGNMENT(def) DMA_RAM def __attribute__ ((aligned (32)))
+ #else
+-#define ADC_VALUES_ALIGNMENT(def) def 
++#define ADC_VALUES_ALIGNMENT(def) def
+ #endif
+ 
+ typedef enum ADCDevice {
+     ADCINVALID = -1,
+-    ADCDEV_1   = 0,
++    ADCDEV_1 = 0,
+ #if defined(STM32F4) || defined(STM32F7) || defined(STM32H7)
+     ADCDEV_2,
+     ADCDEV_3,
+@@ -53,7 +46,7 @@ typedef struct adcTagMap_s {
+ } adcTagMap_t;
+ 
+ typedef struct adcDevice_s {
+-#if defined(AT32F43x) 
++#if defined(AT32F43x)
+     adc_type* ADCx;
+ #else
+     ADC_TypeDef* ADCx;
+@@ -63,13 +56,16 @@ typedef struct adcDevice_s {
+ #if defined(STM32F4) || defined(STM32F7) || defined(STM32H7)
+     DMA_Stream_TypeDef* DMAy_Streamx;
+     uint32_t channel;
+-#elif defined(AT32F43x) 
++#elif defined(STM32G4)
++    DMA_Channel_TypeDef* DMAy_Channelx;
++    uint32_t channel;
++#elif defined(AT32F43x)
+     dma_channel_type* DMAy_Channelx;
+-    uint32_t dmaMuxid; // dmamux request type
++    uint32_t dmaMuxid;
+ #else
+     DMA_Channel_TypeDef* DMAy_Channelx;
+ #endif
+-#if defined(STM32F7) || defined(STM32H7)
++#if defined(STM32F7) || defined(STM32H7) || defined(STM32G4)
+     ADC_HandleTypeDef ADCHandle;
+     DMA_HandleTypeDef DmaHandle;
+ #endif
+@@ -80,8 +76,8 @@ typedef struct adcDevice_s {
+ typedef struct adc_config_s {
+     ioTag_t tag;
+     ADCDevice adcDevice;
+-    uint32_t adcChannel;         // ADC1_INxx channel number
+-    uint8_t dmaIndex;           // index into DMA buffer in case of sparse channels
++    uint32_t adcChannel;
++    uint8_t dmaIndex;
+     bool enabled;
+     uint8_t sampleTime;
+ } adc_config_t;
+@@ -91,7 +87,7 @@ extern adc_config_t adcConfig[ADC_CHN_COUNT];
+ extern volatile ADC_VALUES_ALIGNMENT(uint16_t adcValues[ADCDEV_COUNT][ADC_CHN_COUNT * ADC_AVERAGE_N_SAMPLES]);
+ 
+ void adcHardwareInit(drv_adc_config_t *init);
+-#if defined(AT32F43x) 
++#if defined(AT32F43x)
+ ADCDevice adcDeviceByInstance(adc_type *instance);
+ #else
+ ADCDevice adcDeviceByInstance(ADC_TypeDef *instance);
+diff --git a/src/main/drivers/adc_stm32g4xx.c b/src/main/drivers/adc_stm32g4xx.c
+new file mode 100644
+index 000000000..e48a12ad2
+--- /dev/null
++++ b/src/main/drivers/adc_stm32g4xx.c
+@@ -0,0 +1,184 @@
++/*
++ * STM32G4 ADC driver for INAV.
++ */
++
++#include <stdbool.h>
++#include <stdint.h>
++#include <string.h>
++
++#include "platform.h"
++
++#ifdef USE_ADC
++
++#include "drivers/time.h"
++#include "drivers/io.h"
++#include "drivers/io_impl.h"
++#include "drivers/rcc.h"
++#include "drivers/dma.h"
++
++#include "drivers/sensor.h"
++#include "drivers/adc.h"
++#include "drivers/adc_impl.h"
++
++static adcDevice_t adcHardware[ADCDEV_COUNT] = {
++    {
++        .ADCx = ADC1,
++        .rccADC = RCC_AHB2(ADC12),
++        .rccDMA = RCC_AHB1(DMA2),
++        .DMAy_Channelx = DMA2_Channel1,
++        .channel = DMA_REQUEST_ADC1,
++        .enabled = false,
++        .usedChannelCount = 0,
++    },
++};
++
++const adcTagMap_t adcTagMap[ADC_TAG_MAP_COUNT] = {
++    { DEFIO_TAG_E__PA0, ADC_CHANNEL_1 },
++    { DEFIO_TAG_E__PA1, ADC_CHANNEL_2 },
++    { DEFIO_TAG_E__NONE, 0 },
++    { DEFIO_TAG_E__NONE, 0 },
++    { DEFIO_TAG_E__NONE, 0 },
++    { DEFIO_TAG_E__NONE, 0 },
++    { DEFIO_TAG_E__NONE, 0 },
++    { DEFIO_TAG_E__NONE, 0 },
++    { DEFIO_TAG_E__NONE, 0 },
++    { DEFIO_TAG_E__NONE, 0 },
++    { DEFIO_TAG_E__NONE, 0 },
++    { DEFIO_TAG_E__NONE, 0 },
++    { DEFIO_TAG_E__NONE, 0 },
++    { DEFIO_TAG_E__NONE, 0 },
++    { DEFIO_TAG_E__NONE, 0 },
++    { DEFIO_TAG_E__NONE, 0 },
++};
++
++static const uint32_t adcRegularRankMap[] = {
++    ADC_REGULAR_RANK_1,
++    ADC_REGULAR_RANK_2,
++    ADC_REGULAR_RANK_3,
++    ADC_REGULAR_RANK_4,
++    ADC_REGULAR_RANK_5,
++    ADC_REGULAR_RANK_6,
++    ADC_REGULAR_RANK_7,
++    ADC_REGULAR_RANK_8,
++    ADC_REGULAR_RANK_9,
++    ADC_REGULAR_RANK_10,
++    ADC_REGULAR_RANK_11,
++    ADC_REGULAR_RANK_12,
++    ADC_REGULAR_RANK_13,
++    ADC_REGULAR_RANK_14,
++    ADC_REGULAR_RANK_15,
++    ADC_REGULAR_RANK_16,
++};
++
++ADCDevice adcDeviceByInstance(ADC_TypeDef *instance)
++{
++    return instance == ADC1 ? ADCDEV_1 : ADCINVALID;
++}
++
++static void adcInstanceInit(ADCDevice adcDevice)
++{
++    adcDevice_t *adc = &adcHardware[adcDevice];
++
++    RCC_ClockCmd(adc->rccDMA, ENABLE);
++    RCC_ClockCmd(RCC_AHB1(DMAMUX1), ENABLE);
++    RCC_ClockCmd(adc->rccADC, ENABLE);
++
++    adc->ADCHandle.Instance = adc->ADCx;
++    adc->ADCHandle.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
++    adc->ADCHandle.Init.Resolution = ADC_RESOLUTION_12B;
++    adc->ADCHandle.Init.DataAlign = ADC_DATAALIGN_RIGHT;
++    adc->ADCHandle.Init.ScanConvMode = adc->usedChannelCount > 1 ? ADC_SCAN_ENABLE : ADC_SCAN_DISABLE;
++    adc->ADCHandle.Init.EOCSelection = ADC_EOC_SEQ_CONV;
++    adc->ADCHandle.Init.LowPowerAutoWait = DISABLE;
++    adc->ADCHandle.Init.ContinuousConvMode = ENABLE;
++    adc->ADCHandle.Init.NbrOfConversion = adc->usedChannelCount;
++    adc->ADCHandle.Init.DiscontinuousConvMode = DISABLE;
++    adc->ADCHandle.Init.NbrOfDiscConversion = 0;
++    adc->ADCHandle.Init.ExternalTrigConv = ADC_SOFTWARE_START;
++    adc->ADCHandle.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
++    adc->ADCHandle.Init.DMAContinuousRequests = ENABLE;
++    adc->ADCHandle.Init.Overrun = ADC_OVR_DATA_OVERWRITTEN;
++    adc->ADCHandle.Init.OversamplingMode = DISABLE;
++
++    if (HAL_ADC_Init(&adc->ADCHandle) != HAL_OK) {
++        return;
++    }
++
++    if (HAL_ADCEx_Calibration_Start(&adc->ADCHandle, ADC_SINGLE_ENDED) != HAL_OK) {
++        return;
++    }
++
++    adc->DmaHandle.Instance = adc->DMAy_Channelx;
++    adc->DmaHandle.Init.Request = adc->channel;
++    adc->DmaHandle.Init.Direction = DMA_PERIPH_TO_MEMORY;
++    adc->DmaHandle.Init.PeriphInc = DMA_PINC_DISABLE;
++    adc->DmaHandle.Init.MemInc = ((adc->usedChannelCount > 1) || (ADC_AVERAGE_N_SAMPLES > 1)) ? DMA_MINC_ENABLE : DMA_MINC_DISABLE;
++    adc->DmaHandle.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD;
++    adc->DmaHandle.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
++    adc->DmaHandle.Init.Mode = DMA_CIRCULAR;
++    adc->DmaHandle.Init.Priority = DMA_PRIORITY_HIGH;
++
++    if (HAL_DMA_Init(&adc->DmaHandle) != HAL_OK) {
++        return;
++    }
++
++    __HAL_LINKDMA(&adc->ADCHandle, DMA_Handle, adc->DmaHandle);
++
++    uint8_t rank = 0;
++    for (int i = ADC_CHN_1; i < ADC_CHN_COUNT; i++) {
++        if (!adcConfig[i].enabled || adcConfig[i].adcDevice != adcDevice) {
++            continue;
++        }
++
++        ADC_ChannelConfTypeDef sConfig = {
++            .Channel = adcConfig[i].adcChannel,
++            .Rank = adcRegularRankMap[rank++],
++            .SamplingTime = ADC_SAMPLETIME_247CYCLES_5,
++            .SingleDiff = ADC_SINGLE_ENDED,
++            .OffsetNumber = ADC_OFFSET_NONE,
++            .Offset = 0,
++        };
++
++        if (HAL_ADC_ConfigChannel(&adc->ADCHandle, &sConfig) != HAL_OK) {
++            return;
++        }
++    }
++
++    HAL_ADC_Start_DMA(&adc->ADCHandle, (uint32_t *)&adcValues[adcDevice], adc->usedChannelCount * ADC_AVERAGE_N_SAMPLES);
++}
++
++void adcHardwareInit(drv_adc_config_t *init)
++{
++    UNUSED(init);
++    int configuredAdcChannels = 0;
++
++    for (int i = ADC_CHN_1; i < ADC_CHN_COUNT; i++) {
++        if (!adcConfig[i].tag) {
++            continue;
++        }
++
++        adcDevice_t *adc = &adcHardware[adcConfig[i].adcDevice];
++
++        IOInit(IOGetByTag(adcConfig[i].tag), OWNER_ADC, RESOURCE_ADC_CH1 + (i - ADC_CHN_1), 0);
++        IOConfigGPIO(IOGetByTag(adcConfig[i].tag), IO_CONFIG(GPIO_MODE_ANALOG, 0, GPIO_NOPULL));
++
++        adcConfig[i].adcChannel = adcChannelByTag(adcConfig[i].tag);
++        adcConfig[i].dmaIndex = adc->usedChannelCount++;
++        adcConfig[i].sampleTime = ADC_SAMPLETIME_247CYCLES_5;
++        adcConfig[i].enabled = true;
++        adc->enabled = true;
++        configuredAdcChannels++;
++    }
++
++    if (configuredAdcChannels == 0) {
++        return;
++    }
++
++    for (int i = 0; i < ADCDEV_COUNT; i++) {
++        if (adcHardware[i].enabled) {
++            adcInstanceInit(i);
++        }
++    }
++}
++
++#endif
+\ No newline at end of file
+diff --git a/src/main/drivers/bus_i2c.h b/src/main/drivers/bus_i2c.h
+index bf685b1bf..56ec18c5e 100644
+--- a/src/main/drivers/bus_i2c.h
++++ b/src/main/drivers/bus_i2c.h
+@@ -56,7 +56,7 @@ typedef struct i2cDevice_s {
+     ioTag_t sda;
+     rccPeriphTag_t rcc;
+     I2CSpeed speed;
+-#if defined(STM32F7) || defined(STM32H7) || defined(AT32F43x) 
++#if defined(STM32F7) || defined(STM32H7) || defined(STM32G4) || defined(AT32F43x) 
+     uint8_t ev_irq;
+     uint8_t er_irq;
+     uint8_t af;
+diff --git a/src/main/drivers/bus_i2c_hal.c b/src/main/drivers/bus_i2c_hal.c
+index 3b1459ab1..24c91914d 100644
+--- a/src/main/drivers/bus_i2c_hal.c
++++ b/src/main/drivers/bus_i2c_hal.c
+@@ -73,7 +73,7 @@ static void i2cUnstick(IO_t scl, IO_t sda);
+ 
+ static i2cDevice_t i2cHardwareMap[I2CDEV_COUNT] = {
+ 
+-#if defined(STM32F7)
++#if defined(STM32F7) || defined(STM32G4)
+     { .dev = I2C1, .scl = IO_TAG(I2C1_SCL), .sda = IO_TAG(I2C1_SDA), .rcc = RCC_APB1(I2C1), .speed = I2C_SPEED_400KHZ, .ev_irq = I2C1_EV_IRQn, .er_irq = I2C1_ER_IRQn, .af = GPIO_AF4_I2C1 },
+     { .dev = I2C2, .scl = IO_TAG(I2C2_SCL), .sda = IO_TAG(I2C2_SDA), .rcc = RCC_APB1(I2C2), .speed = I2C_SPEED_400KHZ, .ev_irq = I2C2_EV_IRQn, .er_irq = I2C2_ER_IRQn, .af = GPIO_AF4_I2C2 },
+     { .dev = I2C3, .scl = IO_TAG(I2C3_SCL), .sda = IO_TAG(I2C3_SDA), .rcc = RCC_APB1(I2C3), .speed = I2C_SPEED_400KHZ, .ev_irq = I2C3_EV_IRQn, .er_irq = I2C3_ER_IRQn, .af = GPIO_AF4_I2C3 },
+diff --git a/src/main/drivers/bus_spi.h b/src/main/drivers/bus_spi.h
+index 5cd3962f8..a9ecaff72 100644
+--- a/src/main/drivers/bus_spi.h
++++ b/src/main/drivers/bus_spi.h
+@@ -26,7 +26,7 @@
+ #define SPI_IO_AF_SCK_CFG       IO_CONFIG(GPIO_Mode_AF,  GPIO_Speed_50MHz, GPIO_OType_PP, GPIO_PuPd_DOWN)
+ #define SPI_IO_AF_MISO_CFG      IO_CONFIG(GPIO_Mode_AF,  GPIO_Speed_50MHz, GPIO_OType_PP, GPIO_PuPd_UP)
+ #define SPI_IO_CS_CFG           IO_CONFIG(GPIO_Mode_OUT, GPIO_Speed_50MHz, GPIO_OType_PP, GPIO_PuPd_NOPULL)
+-#elif defined(STM32F7) || defined(STM32H7)
++#elif defined(STM32F7) || defined(STM32H7) || defined(STM32G4)
+ #define SPI_IO_AF_CFG           IO_CONFIG(GPIO_MODE_AF_PP, GPIO_SPEED_FREQ_VERY_HIGH, GPIO_NOPULL)
+ #define SPI_IO_AF_SCK_CFG_HIGH  IO_CONFIG(GPIO_MODE_AF_PP, GPIO_SPEED_FREQ_VERY_HIGH, GPIO_PULLUP)
+ #define SPI_IO_AF_SCK_CFG_LOW   IO_CONFIG(GPIO_MODE_AF_PP, GPIO_SPEED_FREQ_VERY_HIGH, GPIO_PULLDOWN)
+@@ -65,7 +65,7 @@ typedef enum SPIDevice {
+ 
+ #if defined(STM32F4)
+ #define SPIDEV_COUNT 3
+-#elif defined(STM32F7) || defined(STM32H7)|| defined(AT32F43x)
++#elif defined(STM32F7) || defined(STM32H7) || defined(STM32G4)|| defined(AT32F43x)
+ #define SPIDEV_COUNT 4
+ #else
+ #define SPIDEV_COUNT 4
+@@ -86,7 +86,7 @@ typedef struct SPIDevice_s {
+     ioTag_t mosi;
+     ioTag_t miso;
+     rccPeriphTag_t rcc;
+-#if defined(STM32F7) || defined(STM32H7) || defined(AT32F43x)
++#if defined(STM32F7) || defined(STM32H7) || defined(STM32G4) || defined(AT32F43x)
+     uint8_t sckAF;
+     uint8_t misoAF;
+     uint8_t mosiAF;
+diff --git a/src/main/drivers/bus_spi_hal_ll.c b/src/main/drivers/bus_spi_hal_ll.c
+index ce6fbde95..08df4569f 100644
+--- a/src/main/drivers/bus_spi_hal_ll.c
++++ b/src/main/drivers/bus_spi_hal_ll.c
+@@ -167,7 +167,7 @@ static spiDevice_t spiHardwareMap[SPIDEV_COUNT] = {
+     { .dev = NULL }     // No SPI4
+ #endif
+ };
+-#elif defined(STM32F7)
++#elif defined(STM32F7) || defined(STM32G4)
+ #include "bus_spi_stm32f7xx.h"
+ 
+ // Auto-resolve SPI AF per pin from the lookup table in bus_spi_stm32f7xx.h.
+diff --git a/src/main/drivers/cmsis_dsp_stubs.c b/src/main/drivers/cmsis_dsp_stubs.c
+new file mode 100644
+index 000000000..357bb9097
+--- /dev/null
++++ b/src/main/drivers/cmsis_dsp_stubs.c
+@@ -0,0 +1,53 @@
++/*
++ * Small scalar fallbacks for the CMSIS DSP primitives used by INAV.
++ * This keeps the STM32G4 target within the 512 KiB flash budget without
++ * pulling in the full CMSIS-DSP transform library.
++ */
++
++#include <math.h>
++#include <stdint.h>
++
++#include "arm_math.h"
++
++void arm_mult_f32(float32_t *pSrcA, float32_t *pSrcB, float32_t *pDst, uint32_t blockSize)
++{
++    for (uint32_t i = 0; i < blockSize; i++) {
++        pDst[i] = pSrcA[i] * pSrcB[i];
++    }
++}
++
++void arm_sub_f32(float32_t *pSrcA, float32_t *pSrcB, float32_t *pDst, uint32_t blockSize)
++{
++    for (uint32_t i = 0; i < blockSize; i++) {
++        pDst[i] = pSrcA[i] - pSrcB[i];
++    }
++}
++
++void arm_scale_f32(float32_t *pSrc, float32_t scale, float32_t *pDst, uint32_t blockSize)
++{
++    for (uint32_t i = 0; i < blockSize; i++) {
++        pDst[i] = pSrc[i] * scale;
++    }
++}
++
++void arm_std_f32(float32_t *pSrc, uint32_t blockSize, float32_t *pResult)
++{
++    if (blockSize == 0U) {
++        *pResult = 0.0f;
++        return;
++    }
++
++    float32_t mean = 0.0f;
++    for (uint32_t i = 0; i < blockSize; i++) {
++        mean += pSrc[i];
++    }
++    mean /= (float32_t)blockSize;
++
++    float32_t variance = 0.0f;
++    for (uint32_t i = 0; i < blockSize; i++) {
++        const float32_t delta = pSrc[i] - mean;
++        variance += delta * delta;
++    }
++
++    *pResult = sqrtf(variance / (float32_t)blockSize);
++}
+\ No newline at end of file
+diff --git a/src/main/drivers/dma.h b/src/main/drivers/dma.h
+index 10ece9992..3b108dad1 100644
+--- a/src/main/drivers/dma.h
++++ b/src/main/drivers/dma.h
+@@ -37,7 +37,24 @@ typedef uint32_t DMA_TypeDef;
+ 
+ typedef void (*dmaCallbackHandlerFuncPtr)(DMA_t channelDescriptor);
+ 
+-#if defined(AT32F43x)
++#if defined(STM32G4)
++    #define DMA_IT_TCIF                         ((uint32_t)0x00000002)
++    #define DMA_IT_HTIF                         ((uint32_t)0x00000004)
++    #define DMA_IT_TEIF                         ((uint32_t)0x00000008)
++
++typedef struct dmaChannelDescriptor_s {
++    dmaTag_t tag;
++    DMA_TypeDef* dma;
++    DMA_Channel_TypeDef* ref;
++    dmaCallbackHandlerFuncPtr irqHandlerCallback;
++    uint32_t flagsShift;
++    IRQn_Type irqNumber;
++    uint32_t userParam;
++    resourceOwner_e owner;
++    uint8_t resourceIndex;
++} dmaChannelDescriptor_t;
++
++#elif defined(AT32F43x)
+     #define DMA_IT_TCIF                         ((uint32_t)0x00000002) /*!< dma full data transfer interrupt */
+     #define DMA_IT_HTIF                         ((uint32_t)0x00000004) /*!< dma half data transfer interrupt */
+     #define DMA_IT_DMEIF                        ((uint32_t)0x00000008) /*!< dma errorr interrupt */
+@@ -107,6 +124,28 @@ typedef void (*dmaCallbackHandlerFuncPtr)(DMA_t channelDescriptor);
+ 
+ DMA_t dmaGetByRef(const DMA_Stream_TypeDef * ref);
+ 
++#elif defined(STM32G4)
++
++#define DEFINE_DMA_CHANNEL(d, c, f) { \
++                                        .tag = DMA_TAG(d, c - 1, 0), \
++                                        .dma = DMA##d, \
++                                        .ref = DMA##d##_Channel##c, \
++                                        .irqHandlerCallback = NULL, \
++                                        .flagsShift = f, \
++                                        .irqNumber = DMA##d##_Channel##c##_IRQn, \
++                                        .userParam = 0 \
++                                    }
++
++#define DEFINE_DMA_IRQ_HANDLER(d, c, i) void DMA ## d ## _Channel ## c ## _IRQHandler(void) {\
++                                                                if (dmaDescriptors[i].irqHandlerCallback)\
++                                                                    dmaDescriptors[i].irqHandlerCallback(&dmaDescriptors[i]);\
++                                                            }
++
++#define DMA_CLEAR_FLAG(d, flag) d->dma->IFCR = (flag << d->flagsShift)
++#define DMA_GET_FLAG_STATUS(d, flag) (d->dma->ISR & (flag << d->flagsShift))
++
++DMA_t dmaGetByRef(const DMA_Channel_TypeDef * ref);
++
+ #elif defined(AT32F43x)
+ 
+ // DEFINE_DMA_CHANNEL(d, s, f) use DMA_TAG(d, s, 0)
+diff --git a/src/main/drivers/dma_stm32g4xx.c b/src/main/drivers/dma_stm32g4xx.c
+new file mode 100644
+index 000000000..dd91301bc
+--- /dev/null
++++ b/src/main/drivers/dma_stm32g4xx.c
+@@ -0,0 +1,107 @@
++/*
++ * STM32G4 DMA channel support for INAV.
++ */
++
++#include <stdbool.h>
++#include <stdint.h>
++#include <string.h>
++
++#include <platform.h>
++
++#include "common/utils.h"
++#include "drivers/nvic.h"
++#include "drivers/dma.h"
++#include "drivers/rcc.h"
++
++static dmaChannelDescriptor_t dmaDescriptors[] = {
++    [0]  = DEFINE_DMA_CHANNEL(1, 1,  0),
++    [1]  = DEFINE_DMA_CHANNEL(1, 2,  4),
++    [2]  = DEFINE_DMA_CHANNEL(1, 3,  8),
++    [3]  = DEFINE_DMA_CHANNEL(1, 4, 12),
++    [4]  = DEFINE_DMA_CHANNEL(1, 5, 16),
++    [5]  = DEFINE_DMA_CHANNEL(1, 6, 20),
++    [6]  = DEFINE_DMA_CHANNEL(1, 7, 24),
++    [7]  = DEFINE_DMA_CHANNEL(1, 8, 28),
++
++    [8]  = DEFINE_DMA_CHANNEL(2, 1,  0),
++    [9]  = DEFINE_DMA_CHANNEL(2, 2,  4),
++    [10] = DEFINE_DMA_CHANNEL(2, 3,  8),
++    [11] = DEFINE_DMA_CHANNEL(2, 4, 12),
++    [12] = DEFINE_DMA_CHANNEL(2, 5, 16),
++    [13] = DEFINE_DMA_CHANNEL(2, 6, 20),
++    [14] = DEFINE_DMA_CHANNEL(2, 7, 24),
++    [15] = DEFINE_DMA_CHANNEL(2, 8, 28),
++};
++
++DEFINE_DMA_IRQ_HANDLER(1, 1, 0)
++DEFINE_DMA_IRQ_HANDLER(1, 2, 1)
++DEFINE_DMA_IRQ_HANDLER(1, 3, 2)
++DEFINE_DMA_IRQ_HANDLER(1, 4, 3)
++DEFINE_DMA_IRQ_HANDLER(1, 5, 4)
++DEFINE_DMA_IRQ_HANDLER(1, 6, 5)
++DEFINE_DMA_IRQ_HANDLER(1, 7, 6)
++DEFINE_DMA_IRQ_HANDLER(1, 8, 7)
++DEFINE_DMA_IRQ_HANDLER(2, 1, 8)
++DEFINE_DMA_IRQ_HANDLER(2, 2, 9)
++DEFINE_DMA_IRQ_HANDLER(2, 3, 10)
++DEFINE_DMA_IRQ_HANDLER(2, 4, 11)
++DEFINE_DMA_IRQ_HANDLER(2, 5, 12)
++DEFINE_DMA_IRQ_HANDLER(2, 6, 13)
++DEFINE_DMA_IRQ_HANDLER(2, 7, 14)
++DEFINE_DMA_IRQ_HANDLER(2, 8, 15)
++
++DMA_t dmaGetByTag(dmaTag_t tag)
++{
++    for (unsigned i = 0; i < ARRAYLEN(dmaDescriptors); i++) {
++        if (DMATAG_GET_DMA(dmaDescriptors[i].tag) == DMATAG_GET_DMA(tag) &&
++            DMATAG_GET_STREAM(dmaDescriptors[i].tag) == DMATAG_GET_STREAM(tag)) {
++            return &dmaDescriptors[i];
++        }
++    }
++
++    return NULL;
++}
++
++void dmaEnableClock(DMA_t dma)
++{
++    RCC_ClockCmd(dma->dma == DMA1 ? RCC_AHB1(DMA1) : RCC_AHB1(DMA2), ENABLE);
++    RCC_ClockCmd(RCC_AHB1(DMAMUX1), ENABLE);
++}
++
++resourceOwner_e dmaGetOwner(DMA_t dma)
++{
++    return dma->owner;
++}
++
++void dmaInit(DMA_t dma, resourceOwner_e owner, uint8_t resourceIndex)
++{
++    dmaEnableClock(dma);
++    dma->owner = owner;
++    dma->resourceIndex = resourceIndex;
++}
++
++void dmaSetHandler(DMA_t dma, dmaCallbackHandlerFuncPtr callback, uint32_t priority, uint32_t userParam)
++{
++    dmaEnableClock(dma);
++    dma->irqHandlerCallback = callback;
++    dma->userParam = userParam;
++
++    HAL_NVIC_SetPriority(dma->irqNumber, priority, 0);
++    HAL_NVIC_EnableIRQ(dma->irqNumber);
++}
++
++uint32_t dmaGetChannelByTag(dmaTag_t tag)
++{
++    return DMATAG_GET_CHANNEL(tag);
++}
++
++DMA_t dmaGetByRef(const DMA_Channel_TypeDef *ref)
++{
++    for (unsigned i = 0; i < ARRAYLEN(dmaDescriptors); i++) {
++        if (ref == dmaDescriptors[i].ref) {
++            return &dmaDescriptors[i];
++        }
++    }
++
++    return NULL;
++}
+\ No newline at end of file
+diff --git a/src/main/drivers/exti.c b/src/main/drivers/exti.c
+index 3ef0ef324..d1bf93597 100644
+--- a/src/main/drivers/exti.c
++++ b/src/main/drivers/exti.c
+@@ -24,7 +24,7 @@ extiChannelRec_t extiChannelRecs[16];
+ static const uint8_t extiGroups[16] = { 0, 1, 2, 3, 4, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6 };
+ static uint8_t extiGroupPriority[EXTI_IRQ_GROUPS];
+ 
+-#if defined(STM32F4) || defined(STM32F7) || defined(STM32H7)
++#if defined(STM32F4) || defined(STM32G4) || defined(STM32F7) || defined(STM32H7) || defined(STM32G4)
+ static const uint8_t extiGroupIRQn[EXTI_IRQ_GROUPS] = {
+     EXTI0_IRQn,
+     EXTI1_IRQn,
+@@ -49,7 +49,10 @@ static const uint8_t extiGroupIRQn[EXTI_IRQ_GROUPS] = {
+ #endif
+ 
+ // Absorb the difference in IMR and PR assignments to registers
+-#if defined(STM32H7)
++#if defined(STM32G4)
++#define EXTI_REG_IMR (EXTI->IMR1)
++#define EXTI_REG_PR  (EXTI->PR1)
++#elif defined(STM32H7)
+ #define EXTI_REG_IMR (EXTI_D1->IMR1)
+ #define EXTI_REG_PR  (EXTI_D1->PR1)
+ #elif defined(AT32F43x)  
+@@ -67,6 +70,8 @@ void EXTIInit(void)
+ #if defined(STM32F4)
+     /* Enable SYSCFG clock otherwise the EXTI irq handlers are not called */
+     RCC_APB2PeriphClockCmd(RCC_APB2Periph_SYSCFG, ENABLE);
++#elif defined(STM32G4)
++    __HAL_RCC_SYSCFG_CLK_ENABLE();
+ #elif defined(AT32F43x)  
+     crm_periph_clock_enable(CRM_SCFG_PERIPH_CLOCK, TRUE);
+ #endif
+@@ -79,7 +84,7 @@ void EXTIHandlerInit(extiCallbackRec_t *self, extiHandlerCallback *fn)
+     self->fn = fn;
+ }
+ 
+-#if defined(STM32F7) || defined(STM32H7)
++#if defined(STM32F7) || defined(STM32H7) || defined(STM32G4)
+ void EXTIConfig(IO_t io, extiCallbackRec_t *cb, int irqPriority, ioConfig_t config)
+ {
+     (void)config;
+@@ -155,7 +160,7 @@ void EXTIConfig(IO_t io, extiCallbackRec_t *cb, int irqPriority, EXTITrigger_Typ
+     int group = extiGroups[chIdx];
+ 
+     rec->handler = cb;
+-#if defined(STM32F4)
++#if defined(STM32F4) || defined(STM32G4)
+     SYSCFG_EXTILineConfig(IO_EXTI_PortSourceGPIO(io), IO_EXTI_PinSource(io));
+ #else
+ # warning "Unknown CPU"
+@@ -199,7 +204,7 @@ void EXTIRelease(IO_t io)
+ 
+ void EXTIEnable(IO_t io, bool enable)
+ {
+-#if defined(STM32F4) || defined(STM32F7) || defined(STM32H7)|| defined(AT32F43x)
++#if defined(STM32F4) || defined(STM32G4) || defined(STM32F7) || defined(STM32H7) || defined(STM32G4)|| defined(AT32F43x)
+     uint32_t extiLine = IO_EXTI_Line(io);
+     if (!extiLine)
+         return;
+@@ -244,7 +249,7 @@ _EXTI_IRQ_HANDLER(EXINT15_10_IRQHandler);
+ #else
+ _EXTI_IRQ_HANDLER(EXTI0_IRQHandler);
+ _EXTI_IRQ_HANDLER(EXTI1_IRQHandler);
+-#if defined(STM32F7) || defined(STM32H7)
++#if defined(STM32F7) || defined(STM32H7) || defined(STM32G4)
+ _EXTI_IRQ_HANDLER(EXTI2_IRQHandler);
+ #elif defined(STM32F4) || defined(AT32F43x)  
+ _EXTI_IRQ_HANDLER(EXTI2_TS_IRQHandler);
+diff --git a/src/main/drivers/exti.h b/src/main/drivers/exti.h
+index dbc5be164..b9eca6f7b 100644
+--- a/src/main/drivers/exti.h
++++ b/src/main/drivers/exti.h
+@@ -35,7 +35,7 @@ struct extiCallbackRec_s {
+ void EXTIInit(void);
+ 
+ void EXTIHandlerInit(extiCallbackRec_t *cb, extiHandlerCallback *fn);
+-#if defined(STM32F7) || defined(STM32H7)
++#if defined(STM32F7) || defined(STM32H7) || defined(STM32G4)
+ void EXTIConfig(IO_t io, extiCallbackRec_t *cb, int irqPriority, ioConfig_t config);
+ #elif defined(AT32F43x)
+ void EXTIConfig(IO_t io, extiCallbackRec_t *cb, int irqPriority, exint_polarity_config_type trigger);
+diff --git a/src/main/drivers/io.c b/src/main/drivers/io.c
+index 8fa32ad53..606462e6f 100644
+--- a/src/main/drivers/io.c
++++ b/src/main/drivers/io.c
+@@ -48,6 +48,15 @@ const struct ioPortDef_s ioPortDefs[] = {
+     { RCC_AHB1(GPIOE) },
+     { RCC_AHB1(GPIOF) },
+ };
++#elif defined(STM32G4)
++const struct ioPortDef_s ioPortDefs[] = {
++    { RCC_AHB2(GPIOA) },
++    { RCC_AHB2(GPIOB) },
++    { RCC_AHB2(GPIOC) },
++    { RCC_AHB2(GPIOD) },
++    { RCC_AHB2(GPIOE) },
++    { RCC_AHB2(GPIOF) },
++};
+ #elif defined(STM32H7)
+ const struct ioPortDef_s ioPortDefs[] = {
+     { RCC_AHB4(GPIOA) },
+@@ -145,7 +154,7 @@ uint32_t IO_EXTI_Line(IO_t io)
+     if (!io) {
+         return 0;
+     }
+-#if defined(STM32F4) || defined(STM32F7) || defined(STM32H7) || defined(AT32F43x)
++#if defined(STM32F4) || defined(STM32F7) || defined(STM32H7) || defined(STM32G4) || defined(AT32F43x)
+     return 1 << IO_GPIOPinIdx(io);
+ #elif defined(SITL_BUILD) || defined(RP2350)
+     return 0;
+@@ -293,7 +302,7 @@ resourceType_e IOGetResource(IO_t io)
+     return ioRec->resource;
+ }
+ 
+-#if defined(STM32F7) || defined(STM32H7)
++#if defined(STM32F7) || defined(STM32H7) || defined(STM32G4)
+ 
+ void IOConfigGPIO(IO_t io, ioConfig_t cfg)
+ {
+diff --git a/src/main/drivers/io.h b/src/main/drivers/io.h
+index 3ff6b3c0f..941cc1270 100644
+--- a/src/main/drivers/io.h
++++ b/src/main/drivers/io.h
+@@ -33,7 +33,7 @@
+ // expand pinid to to ioTag_t
+ #define IO_TAG(pinid) DEFIO_TAG(pinid)
+ 
+-#if defined(STM32F7) || defined(STM32H7)
++#if defined(STM32F7) || defined(STM32H7) || defined(STM32G4)
+ 
+ //speed is packed inside modebits 5 and 2,
+ #define IO_CONFIG(mode, speed, pupd) ((mode) | ((speed) << 2) | ((pupd) << 5))
+diff --git a/src/main/drivers/persistent.c b/src/main/drivers/persistent.c
+index cdb7c69fd..f419df3cc 100644
+--- a/src/main/drivers/persistent.c
++++ b/src/main/drivers/persistent.c
+@@ -86,9 +86,11 @@ void persistentObjectRTCEnable(void)
+ #endif
+     HAL_PWR_EnableBkUpAccess(); // Disable backup domain protection
+ 
+-#if defined(__HAL_RCC_RTC_CLK_ENABLE)
+-    // For those MCUs with RTCAPBEN bit in RCC clock enable register, turn it on.
+-    __HAL_RCC_RTC_CLK_ENABLE(); // Enable RTC module
++#if defined(STM32G4)
++    __HAL_RCC_RTCAPB_CLK_ENABLE();
++    __HAL_RCC_RTC_ENABLE();
++#elif defined(__HAL_RCC_RTC_CLK_ENABLE)
++    __HAL_RCC_RTC_CLK_ENABLE();
+ #endif
+ 
+     // We don't need a clock source for RTC itself. Skip it.
+diff --git a/src/main/drivers/persistent.h b/src/main/drivers/persistent.h
+index 34faa1453..42d3d2992 100644
+--- a/src/main/drivers/persistent.h
++++ b/src/main/drivers/persistent.h
+@@ -29,6 +29,8 @@
+ 
+ typedef enum {
+     PERSISTENT_OBJECT_MAGIC = 0,
++    PERSISTENT_OBJECT_HSE_VALUE,
++    PERSISTENT_OBJECT_OVERCLOCK_LEVEL,
+     PERSISTENT_OBJECT_RESET_REASON,
+     PERSISTENT_OBJECT_COUNT,
+ } persistentObjectId_e;
+diff --git a/src/main/drivers/rcc.c b/src/main/drivers/rcc.c
+index 3ca5b153e..ad386593c 100644
+--- a/src/main/drivers/rcc.c
++++ b/src/main/drivers/rcc.c
+@@ -2,152 +2,122 @@
+ #include "platform.h"
+ #include "rcc.h"
+ 
+-#define RCC_BIT_CMD(ptr, mask, state)       do { if (state != DISABLE) { ptr |= mask; } else { ptr &= ~mask; } } while(0)
+-
++#define RCC_BIT_CMD(ptr, mask, state) do { if ((state) != DISABLE) { (ptr) |= (mask); } else { (ptr) &= ~(mask); } } while (0)
+ 
+ void RCC_ClockCmd(rccPeriphTag_t periphTag, FunctionalState NewState)
+ {
+     int tag = periphTag >> 5;
+-    uint32_t mask = 1 << (periphTag & 0x1f);
+-    switch (tag) 
+-    {
+-
+-        #if defined(STM32F4) || defined(STM32F7) || defined(STM32H7)
+-            case RCC_AHB1:
+-                RCC_BIT_CMD(RCC->AHB1ENR, mask, NewState);
+-                break;
+-
+-            case RCC_AHB2:
+-                RCC_BIT_CMD(RCC->AHB2ENR, mask, NewState);
+-                break;
+-        #endif
+-
+-        #if defined(STM32H7)
+-            case RCC_AHB3:
+-                RCC_BIT_CMD(RCC->AHB3ENR, mask, NewState);
+-                break;
+-
+-            case RCC_AHB4:
+-                RCC_BIT_CMD(RCC->AHB4ENR, mask, NewState);
+-                break;
+-
+-            case RCC_APB1L:
+-                RCC_BIT_CMD(RCC->APB1LENR, mask, NewState);
+-                break;
+-
+-            case RCC_APB1H:
+-                RCC_BIT_CMD(RCC->APB1HENR, mask, NewState);
+-                break;
+-
+-            case RCC_APB3:
+-                RCC_BIT_CMD(RCC->APB3ENR, mask, NewState);
+-                break;
+-
+-            case RCC_APB4:
+-                RCC_BIT_CMD(RCC->APB4ENR, mask, NewState);
+-                break;
+-        #endif
+-
+-        #if defined(AT32F43x) 
+-            case RCC_AHB1:
+-                RCC_BIT_CMD(CRM->ahben1, mask, NewState);
+-                break;
+-
+-            case RCC_AHB2:
+-                RCC_BIT_CMD(CRM->ahben2, mask, NewState);
+-                break;
+-
+-            case RCC_APB1:
+-                RCC_BIT_CMD(CRM->apb1en, mask, NewState);
+-                break;
+-
+-            case RCC_APB2:
+-                RCC_BIT_CMD(CRM->apb2en, mask, NewState);
+-                break;
+-        #else 
+-            #if !(defined(STM32H7) || defined(STM32G4))
+-            case RCC_APB1:
+-                RCC_BIT_CMD(RCC->APB1ENR, mask, NewState);
+-                break;
+-            #endif
+-
+-            case RCC_APB2:
+-                RCC_BIT_CMD(RCC->APB2ENR, mask, NewState);
+-                break;
+-    
+-        #endif
++    uint32_t mask = 1U << (periphTag & 0x1f);
++
++    switch (tag) {
++#if defined(STM32F4) || defined(STM32F7) || defined(STM32H7) || defined(STM32G4)
++    case RCC_AHB1:
++        RCC_BIT_CMD(RCC->AHB1ENR, mask, NewState);
++        break;
++    case RCC_AHB2:
++        RCC_BIT_CMD(RCC->AHB2ENR, mask, NewState);
++        break;
++#endif
++
++#if defined(STM32H7)
++    case RCC_AHB3:
++        RCC_BIT_CMD(RCC->AHB3ENR, mask, NewState);
++        break;
++    case RCC_AHB4:
++        RCC_BIT_CMD(RCC->AHB4ENR, mask, NewState);
++        break;
++    case RCC_APB1L:
++        RCC_BIT_CMD(RCC->APB1LENR, mask, NewState);
++        break;
++    case RCC_APB1H:
++        RCC_BIT_CMD(RCC->APB1HENR, mask, NewState);
++        break;
++    case RCC_APB3:
++        RCC_BIT_CMD(RCC->APB3ENR, mask, NewState);
++        break;
++    case RCC_APB4:
++        RCC_BIT_CMD(RCC->APB4ENR, mask, NewState);
++        break;
++#elif defined(STM32G4)
++    case RCC_APB1:
++        RCC_BIT_CMD(RCC->APB1ENR1, mask, NewState);
++        break;
++    case RCC_APB2:
++        RCC_BIT_CMD(RCC->APB2ENR, mask, NewState);
++        break;
++#elif defined(AT32F43x)
++    case RCC_APB1:
++        RCC_BIT_CMD(CRM->apb1en, mask, NewState);
++        break;
++    case RCC_APB2:
++        RCC_BIT_CMD(CRM->apb2en, mask, NewState);
++        break;
++#else
++    case RCC_APB1:
++        RCC_BIT_CMD(RCC->APB1ENR, mask, NewState);
++        break;
++    case RCC_APB2:
++        RCC_BIT_CMD(RCC->APB2ENR, mask, NewState);
++        break;
++#endif
+     }
+ }
+ 
+ void RCC_ResetCmd(rccPeriphTag_t periphTag, FunctionalState NewState)
+ {
+     int tag = periphTag >> 5;
+-    uint32_t mask = 1 << (periphTag & 0x1f);
+-
+-    switch (tag) 
+-    {
+-       
+-        #if defined(STM32F4) || defined(STM32F7) || defined(STM32H7)
+-            case RCC_AHB1:
+-                RCC_BIT_CMD(RCC->AHB1RSTR, mask, NewState);
+-                break;
+-
+-            case RCC_AHB2:
+-                RCC_BIT_CMD(RCC->AHB2RSTR, mask, NewState);
+-                break;
+-        #endif
+-
+-        #if defined(STM32H7)
+-            case RCC_AHB3:
+-                RCC_BIT_CMD(RCC->AHB3RSTR, mask, NewState);
+-                break;
+-
+-            case RCC_AHB4:
+-                RCC_BIT_CMD(RCC->AHB4RSTR, mask, NewState);
+-                break;
+-
+-            case RCC_APB1L:
+-                RCC_BIT_CMD(RCC->APB1LRSTR, mask, NewState);
+-                break;
+-
+-            case RCC_APB1H:
+-                RCC_BIT_CMD(RCC->APB1HRSTR, mask, NewState);
+-                break;
+-
+-            case RCC_APB3:
+-                RCC_BIT_CMD(RCC->APB3RSTR, mask, NewState);
+-                break;
+-
+-            case RCC_APB4:
+-                RCC_BIT_CMD(RCC->APB4RSTR, mask, NewState);
+-                break;
+-        #endif
+- 
+-        #if defined(AT32F43x) 
+-            case RCC_AHB1:
+-                RCC_BIT_CMD(CRM->ahbrst1, mask, NewState);
+-                break; 
+-            case RCC_AHB2:
+-                RCC_BIT_CMD(CRM->ahbrst2, mask, NewState);
+-                break; 
+-            case RCC_APB1:
+-                RCC_BIT_CMD(CRM->apb1rst, mask, NewState);
+-                break;
+-            case RCC_APB2:
+-                RCC_BIT_CMD(CRM->apb2rst, mask, NewState);
+-                break;
+-
+-        #else
+-             #if !(defined(STM32H7) || defined(STM32G4))
+-                case RCC_APB1:
+-                    RCC_BIT_CMD(RCC->APB1RSTR, mask, NewState);
+-                    break;
+-             #endif
+-            
+-        
+-             case RCC_APB2:
+-                RCC_BIT_CMD(RCC->APB2RSTR, mask, NewState);
+-                break;
+-        #endif 
++    uint32_t mask = 1U << (periphTag & 0x1f);
++
++    switch (tag) {
++#if defined(STM32F4) || defined(STM32F7) || defined(STM32H7) || defined(STM32G4)
++    case RCC_AHB1:
++        RCC_BIT_CMD(RCC->AHB1RSTR, mask, NewState);
++        break;
++    case RCC_AHB2:
++        RCC_BIT_CMD(RCC->AHB2RSTR, mask, NewState);
++        break;
++#endif
++
++#if defined(STM32H7)
++    case RCC_AHB3:
++        RCC_BIT_CMD(RCC->AHB3RSTR, mask, NewState);
++        break;
++    case RCC_AHB4:
++        RCC_BIT_CMD(RCC->AHB4RSTR, mask, NewState);
++        break;
++    case RCC_APB1L:
++        RCC_BIT_CMD(RCC->APB1LRSTR, mask, NewState);
++        break;
++    case RCC_APB1H:
++        RCC_BIT_CMD(RCC->APB1HRSTR, mask, NewState);
++        break;
++    case RCC_APB3:
++        RCC_BIT_CMD(RCC->APB3RSTR, mask, NewState);
++        break;
++    case RCC_APB4:
++        RCC_BIT_CMD(RCC->APB4RSTR, mask, NewState);
++        break;
++#elif defined(STM32G4)
++    case RCC_APB1:
++        RCC_BIT_CMD(RCC->APB1RSTR1, mask, NewState);
++        break;
++    case RCC_APB2:
++        RCC_BIT_CMD(RCC->APB2RSTR, mask, NewState);
++        break;
++#elif defined(AT32F43x)
++    case RCC_APB1:
++        RCC_BIT_CMD(CRM->apb1rst, mask, NewState);
++        break;
++    case RCC_APB2:
++        RCC_BIT_CMD(CRM->apb2rst, mask, NewState);
++        break;
++#else
++    case RCC_APB1:
++        RCC_BIT_CMD(RCC->APB1RSTR, mask, NewState);
++        break;
++    case RCC_APB2:
++        RCC_BIT_CMD(RCC->APB2RSTR, mask, NewState);
++        break;
++#endif
+     }
+ }
+\ No newline at end of file
+diff --git a/src/main/drivers/rcc.h b/src/main/drivers/rcc.h
+index 6107af734..9661361f0 100644
+--- a/src/main/drivers/rcc.h
++++ b/src/main/drivers/rcc.h
+@@ -4,11 +4,11 @@
+ #include "rcc_at32f43x_periph.h"
+ 
+ typedef enum {
+-    RCC_EMPTY = 0,   // make sure that default value (0) does not enable anything
+-    RCC_AHB,        //0x20      
+-    RCC_APB2,       //0x40  CRM->apb2en
+-    RCC_APB1,       //0x60  CRM->apb1en end AT32 
+-    RCC_AHB1,       //0x80 
++    RCC_EMPTY = 0,
++    RCC_AHB,
++    RCC_APB2,
++    RCC_APB1,
++    RCC_AHB1,
+     RCC_AHB2,
+     RCC_APB1L,
+     RCC_APB1H,
+@@ -17,21 +17,23 @@ typedef enum {
+     RCC_AHB4,
+     RCC_APB4
+ } rcc_reg;
+- 
++
+ #define RCC_ENCODE(reg, mask) (((reg) << 5) | LOG2_32BIT(mask))
+ 
+ #ifdef AT32F43x
+-
+-#define RCC_AHB1(periph) RCC_ENCODE(RCC_AHB1,   CRM_AHB1_ ## periph ## _PER_MASK)
+-#define RCC_AHB2(periph) RCC_ENCODE(RCC_AHB2,   CRM_AHB2_ ## periph ## _PER_MASK)
+-#define RCC_AHB3(periph) RCC_ENCODE(RCC_AHB3,   CRM_AHB3_ ## periph ## _PER_MASK)
+-#define RCC_APB1(periph) RCC_ENCODE(RCC_APB1, 	CRM_APB1_ ## periph ## _PER_MASK)
+-#define RCC_APB2(periph) RCC_ENCODE(RCC_APB2, 	CRM_APB2_ ## periph ## _PER_MASK)
+-
++#define RCC_AHB1(periph) RCC_ENCODE(RCC_AHB1, CRM_AHB1_ ## periph ## _PER_MASK)
++#define RCC_AHB2(periph) RCC_ENCODE(RCC_AHB2, CRM_AHB2_ ## periph ## _PER_MASK)
++#define RCC_AHB3(periph) RCC_ENCODE(RCC_AHB3, CRM_AHB3_ ## periph ## _PER_MASK)
++#define RCC_APB1(periph) RCC_ENCODE(RCC_APB1, CRM_APB1_ ## periph ## _PER_MASK)
++#define RCC_APB2(periph) RCC_ENCODE(RCC_APB2, CRM_APB2_ ## periph ## _PER_MASK)
+ #else
+ #define RCC_AHB(periph) RCC_ENCODE(RCC_AHB, RCC_AHBENR_ ## periph ## EN)
+ #define RCC_AHB1(periph) RCC_ENCODE(RCC_AHB1, RCC_AHB1ENR_ ## periph ## EN)
++#if defined(STM32G4)
++#define RCC_APB1(periph) RCC_ENCODE(RCC_APB1, RCC_APB1ENR1_ ## periph ## EN)
++#else
+ #define RCC_APB1(periph) RCC_ENCODE(RCC_APB1, RCC_APB1ENR_ ## periph ## EN)
++#endif
+ #define RCC_APB2(periph) RCC_ENCODE(RCC_APB2, RCC_APB2ENR_ ## periph ## EN)
+ #endif
+ 
+@@ -45,6 +47,9 @@ typedef enum {
+ #define RCC_APB4(periph) RCC_ENCODE(RCC_APB4, RCC_APB4ENR_ ## periph ## EN)
+ #endif
+ 
++#ifdef STM32G4
++#define RCC_AHB2(periph) RCC_ENCODE(RCC_AHB2, RCC_AHB2ENR_ ## periph ## EN)
++#endif
++
+ void RCC_ClockCmd(rccPeriphTag_t periphTag, FunctionalState NewState);
+ void RCC_ResetCmd(rccPeriphTag_t periphTag, FunctionalState NewState);
+\ No newline at end of file
+-
+diff --git a/src/main/drivers/serial_uart_stm32g4xx.c b/src/main/drivers/serial_uart_stm32g4xx.c
+new file mode 100644
+index 000000000..9b8f8fcf0
+--- /dev/null
++++ b/src/main/drivers/serial_uart_stm32g4xx.c
+@@ -0,0 +1,533 @@
++/*
++ * This file is part of INAV.
++ *
++ * INAV is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * INAV is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with INAV.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++#include <stdbool.h>
++#include <stdint.h>
++
++#include "platform.h"
++
++#include "drivers/time.h"
++#include "drivers/io.h"
++#include "rcc.h"
++#include "drivers/nvic.h"
++
++#include "serial.h"
++#include "serial_uart.h"
++#include "serial_uart_impl.h"
++
++#define UART_RX_BUFFER_SIZE UART1_RX_BUFFER_SIZE
++#define UART_TX_BUFFER_SIZE UART1_TX_BUFFER_SIZE
++
++typedef struct uartDevice_s {
++    USART_TypeDef* dev;
++    uartPort_t port;
++    ioTag_t rx;
++    ioTag_t tx;
++    volatile uint8_t rxBuffer[UART_RX_BUFFER_SIZE];
++    volatile uint8_t txBuffer[UART_TX_BUFFER_SIZE];
++    rccPeriphTag_t rcc;
++    uint8_t af_rx;
++    uint8_t af_tx;
++    uint8_t irq;
++    bool pinSwap;
++} uartDevice_t;
++
++#define UART_PIN_AF_HELPER(uart, pin)  CONCAT4(UART_PIN_AF_UART, uart, _, pin)
++
++#ifdef USE_UART1
++#define UART_PIN_AF_UART1_PA9       GPIO_AF7_USART1
++#define UART_PIN_AF_UART1_PA10      GPIO_AF7_USART1
++#define UART_PIN_AF_UART1_PB6       GPIO_AF7_USART1
++#define UART_PIN_AF_UART1_PB7       GPIO_AF7_USART1
++#define UART_PIN_AF_UART1_PB14      GPIO_AF4_USART1
++#define UART_PIN_AF_UART1_PB15      GPIO_AF4_USART1
++
++static uartDevice_t uart1 =
++{
++    .dev = USART1,
++    .rx = IO_TAG(UART1_RX_PIN),
++    .tx = IO_TAG(UART1_TX_PIN),
++    .af_rx = UART_PIN_AF_HELPER(1, UART1_RX_PIN),
++    .af_tx = UART_PIN_AF_HELPER(1, UART1_TX_PIN),
++    .rcc = RCC_APB2(USART1),
++    .irq = USART1_IRQn,
++#ifdef USE_UART1_PIN_SWAP
++    .pinSwap = true,
++#endif
++};
++#endif
++
++#ifdef USE_UART2
++static uartDevice_t uart2 =
++{
++    .dev = USART2,
++    .rx = IO_TAG(UART2_RX_PIN),
++    .tx = IO_TAG(UART2_TX_PIN),
++    .af_rx = GPIO_AF7_USART2,
++    .af_tx = GPIO_AF7_USART2,
++    .rcc = RCC_APB1(USART2),
++    .irq = USART2_IRQn,
++#ifdef USE_UART2_PIN_SWAP
++    .pinSwap = true,
++#endif
++};
++#endif
++
++#ifdef USE_UART3
++static uartDevice_t uart3 =
++{
++    .dev = USART3,
++    .rx = IO_TAG(UART3_RX_PIN),
++    .tx = IO_TAG(UART3_TX_PIN),
++    .af_rx = GPIO_AF7_USART3,
++    .af_tx = GPIO_AF7_USART3,
++    .rcc = RCC_APB1(USART3),
++    .irq = USART3_IRQn,
++#ifdef USE_UART3_PIN_SWAP
++    .pinSwap = true,
++#endif
++};
++#endif
++
++#ifdef USE_UART4
++#define UART_PIN_AF_UART4_PA0       GPIO_AF5_UART4
++#define UART_PIN_AF_UART4_PA1       GPIO_AF5_UART4
++#define UART_PIN_AF_UART4_PA11      GPIO_AF6_UART4
++#define UART_PIN_AF_UART4_PA12      GPIO_AF6_UART4
++#define UART_PIN_AF_UART4_PB8       GPIO_AF8_UART4
++#define UART_PIN_AF_UART4_PB9       GPIO_AF8_UART4
++#define UART_PIN_AF_UART4_PC10      GPIO_AF5_UART4
++#define UART_PIN_AF_UART4_PC11      GPIO_AF5_UART4
++#define UART_PIN_AF_UART4_PD0       GPIO_AF8_UART4
++#define UART_PIN_AF_UART4_PD1       GPIO_AF8_UART4
++
++static uartDevice_t uart4 =
++{
++    .dev = UART4,
++    .rx = IO_TAG(UART4_RX_PIN),
++    .tx = IO_TAG(UART4_TX_PIN),
++    .af_rx = UART_PIN_AF_HELPER(4, UART4_RX_PIN),
++    .af_tx = UART_PIN_AF_HELPER(4, UART4_TX_PIN),
++    .rcc = RCC_APB1(UART4),
++    .irq = UART4_IRQn,
++#ifdef USE_UART4_PIN_SWAP
++    .pinSwap = true,
++#endif
++};
++#endif
++
++#ifdef USE_UART5
++#define UART_PIN_AF_UART5_PB5       GPIO_AF14_UART5
++#define UART_PIN_AF_UART5_PB6       GPIO_AF14_UART5
++#define UART_PIN_AF_UART5_PB12      GPIO_AF14_UART5
++#define UART_PIN_AF_UART5_PB13      GPIO_AF14_UART5
++#define UART_PIN_AF_UART5_PD2       GPIO_AF8_UART5
++#define UART_PIN_AF_UART5_PC12      GPIO_AF8_UART5
++
++static uartDevice_t uart5 =
++{
++    .dev = UART5,
++    .rx = IO_TAG(UART5_RX_PIN),
++    .tx = IO_TAG(UART5_TX_PIN),
++    .af_rx = UART_PIN_AF_HELPER(5, UART5_RX_PIN),
++    .af_tx = UART_PIN_AF_HELPER(5, UART5_TX_PIN),
++    .rcc = RCC_APB1(UART5),
++    .irq = UART5_IRQn,
++#ifdef USE_UART5_PIN_SWAP
++    .pinSwap = true,
++#endif
++};
++#endif
++
++#ifdef USE_UART6
++static uartDevice_t uart6 =
++{
++    .dev = USART6,
++    .rx = IO_TAG(UART6_RX_PIN),
++    .tx = IO_TAG(UART6_TX_PIN),
++    .af_rx = GPIO_AF7_USART6,
++    .af_tx = GPIO_AF7_USART6,
++    .rcc = RCC_APB2(USART6),
++    .irq = USART6_IRQn,
++#ifdef USE_UART6_PIN_SWAP
++    .pinSwap = true,
++#endif
++};
++#endif
++
++#ifdef USE_UART7
++#define UART_PIN_AF_UART7_PA8       GPIO_AF11_UART7
++#define UART_PIN_AF_UART7_PA15      GPIO_AF11_UART7
++#define UART_PIN_AF_UART7_PB3       GPIO_AF11_UART7
++#define UART_PIN_AF_UART7_PB4       GPIO_AF11_UART7
++#define UART_PIN_AF_UART7_PE7       GPIO_AF7_UART7
++#define UART_PIN_AF_UART7_PE8       GPIO_AF7_UART7
++#define UART_PIN_AF_UART7_PF6       GPIO_AF7_UART7
++#define UART_PIN_AF_UART7_PF7       GPIO_AF7_UART7
++
++static uartDevice_t uart7 =
++{
++    .dev = UART7,
++    .rx = IO_TAG(UART7_RX_PIN),
++#ifdef UART7_TX_PIN
++    .tx = IO_TAG(UART7_TX_PIN),
++#endif
++    .af_rx = UART_PIN_AF_HELPER(7, UART7_RX_PIN),
++#ifdef UART7_TX_PIN
++    .af_tx = UART_PIN_AF_HELPER(7, UART7_TX_PIN),
++#endif
++    .rcc = RCC_APB1(UART7),
++    .irq = UART7_IRQn,
++#ifdef USE_UART7_PIN_SWAP
++    .pinSwap = true,
++#endif
++};
++#endif
++
++#ifdef USE_UART8
++static uartDevice_t uart8 =
++{
++    .dev = UART8,
++    .rx = IO_TAG(UART8_RX_PIN),
++    .tx = IO_TAG(UART8_TX_PIN),
++    .af_rx = GPIO_AF8_UART8,
++    .af_tx = GPIO_AF8_UART8,
++    .rcc = RCC_APB1(UART8),
++    .irq = UART8_IRQn,
++#ifdef USE_UART8_PIN_SWAP
++    .pinSwap = true,
++#endif
++};
++#endif
++
++
++
++static uartDevice_t* uartHardwareMap[] = {
++#ifdef USE_UART1
++    &uart1,
++#else
++    NULL,
++#endif
++#ifdef USE_UART2
++    &uart2,
++#else
++    NULL,
++#endif
++#ifdef USE_UART3
++    &uart3,
++#else
++    NULL,
++#endif
++#ifdef USE_UART4
++    &uart4,
++#else
++    NULL,
++#endif
++#ifdef USE_UART5
++    &uart5,
++#else
++    NULL,
++#endif
++#ifdef USE_UART6
++    &uart6,
++#else
++    NULL,
++#endif
++#ifdef USE_UART7
++    &uart7,
++#else
++    NULL,
++#endif
++#ifdef USE_UART8
++    &uart8,
++#else
++    NULL,
++#endif
++};
++
++static uartDevice_t *uartFindDevice(uartPort_t *uartPort)
++{
++    for (unsigned i = 0; i < UARTDEV_MAX; i++) {
++        uartDevice_t *pDevice = uartHardwareMap[i];
++        if (pDevice && pDevice->dev == uartPort->USARTx) {
++            return pDevice;
++        }
++    }
++    return NULL;
++}
++
++void uartConfigurePinSwap(uartPort_t *uartPort)
++{
++    uartDevice_t *uartDevice = uartFindDevice(uartPort);
++    if (!uartDevice) {
++        return;
++    }
++
++    if (uartDevice->pinSwap) {
++        uartPort->Handle.AdvancedInit.AdvFeatureInit |= UART_ADVFEATURE_SWAP_INIT;
++        uartPort->Handle.AdvancedInit.Swap = UART_ADVFEATURE_SWAP_ENABLE;
++    }
++}
++
++void uartGetPortPins(UARTDevice_e device, serialPortPins_t * pins)
++{
++    uartDevice_t *uart = uartHardwareMap[device];
++
++    if (uart) {
++        pins->txPin = uart->tx;
++        pins->rxPin = uart->rx;
++    }
++    else {
++        pins->txPin = IO_TAG(NONE);
++        pins->rxPin = IO_TAG(NONE);
++    }
++}
++
++void uartIrqHandler(uartPort_t *s)
++{
++    UART_HandleTypeDef *huart = &s->Handle;
++    /* UART in mode Receiver ---------------------------------------------------*/
++    if ((__HAL_UART_GET_IT(huart, UART_IT_RXNE) != RESET)) {
++        uint8_t rbyte = (uint8_t)(huart->Instance->RDR & (uint8_t) 0xff);
++
++        if (s->port.rxCallback) {
++            s->port.rxCallback(rbyte, s->port.rxCallbackData);
++        } else {
++            s->port.rxBuffer[s->port.rxBufferHead] = rbyte;
++            s->port.rxBufferHead = (s->port.rxBufferHead + 1) % s->port.rxBufferSize;
++        }
++        CLEAR_BIT(huart->Instance->CR1, (USART_CR1_PEIE));
++
++        /* Disable the UART Error Interrupt: (Frame error, noise error, overrun error) */
++        CLEAR_BIT(huart->Instance->CR3, USART_CR3_EIE);
++
++        __HAL_UART_SEND_REQ(huart, UART_RXDATA_FLUSH_REQUEST);
++    }
++
++    /* UART parity error interrupt occurred -------------------------------------*/
++    if ((__HAL_UART_GET_IT(huart, UART_IT_PE) != RESET)) {
++        __HAL_UART_CLEAR_IT(huart, UART_CLEAR_PEF);
++    }
++
++    /* UART frame error interrupt occurred --------------------------------------*/
++    if ((__HAL_UART_GET_IT(huart, UART_IT_FE) != RESET)) {
++        __HAL_UART_CLEAR_IT(huart, UART_CLEAR_FEF);
++    }
++
++    /* UART noise error interrupt occurred --------------------------------------*/
++    if ((__HAL_UART_GET_IT(huart, UART_IT_NE) != RESET)) {
++        __HAL_UART_CLEAR_IT(huart, UART_CLEAR_NEF);
++    }
++
++    /* UART Over-Run interrupt occurred -----------------------------------------*/
++    if ((__HAL_UART_GET_IT(huart, UART_IT_ORE) != RESET)) {
++        __HAL_UART_CLEAR_IT(huart, UART_CLEAR_OREF);
++    }
++
++    /* UART in mode Transmitter ------------------------------------------------*/
++    if (__HAL_UART_GET_IT(huart, UART_IT_TXE) != RESET) {
++        /* Check that a Tx process is ongoing */
++        if (huart->gState != HAL_UART_STATE_BUSY_TX) {
++            if (s->port.txBufferTail == s->port.txBufferHead) {
++                huart->TxXferCount = 0;
++                /* Disable the UART Transmit Data Register Empty Interrupt */
++                CLEAR_BIT(huart->Instance->CR1, USART_CR1_TXEIE);
++            } else {
++                if ((huart->Init.WordLength == UART_WORDLENGTH_9B) && (huart->Init.Parity == UART_PARITY_NONE)) {
++                    huart->Instance->TDR = (((uint16_t) s->port.txBuffer[s->port.txBufferTail]) & (uint16_t) 0x01FFU);
++                } else {
++                    huart->Instance->TDR = (uint8_t)(s->port.txBuffer[s->port.txBufferTail]);
++                }
++                s->port.txBufferTail = (s->port.txBufferTail + 1) % s->port.txBufferSize;
++            }
++        }
++    }
++
++    /* UART in mode Transmitter (transmission end) -----------------------------*/
++    // TCIE is never enabled here, so TC is only a stale status flag left over from
++    // the last transmitted byte. It used to be forwarded to HAL_UART_IRQHandler(),
++    // which treats a pending overrun as a blocking error and permanently disables
++    // the RX interrupts (UART_EndRxTransfer) - a receiver on a busy UART then dies
++    // after any long IRQ-disabled window such as an internal flash write. Nothing
++    // in the HAL handler is needed for INAV's own TXE/RXNE-driven transfers, so
++    // just acknowledge the flag.
++    if ((__HAL_UART_GET_IT(huart, UART_IT_TC) != RESET)) {
++        __HAL_UART_CLEAR_IT(huart, UART_CLEAR_TCF);
++    }
++}
++
++uartPort_t *serialUART(UARTDevice_e device, uint32_t baudRate, portMode_t mode, portOptions_t options)
++{
++    uartPort_t *s;
++
++    uartDevice_t *uart = uartHardwareMap[device];
++    if (!uart) return NULL;
++
++    s = &(uart->port);
++    s->port.vTable = uartVTable;
++
++    s->port.baudRate = baudRate;
++
++    s->port.rxBuffer = uart->rxBuffer;
++    s->port.txBuffer = uart->txBuffer;
++    s->port.rxBufferSize = sizeof(uart->rxBuffer);
++    s->port.txBufferSize = sizeof(uart->txBuffer);
++
++    s->USARTx = uart->dev;
++
++    s->Handle.Instance = uart->dev;
++
++    if (uart->rcc) {
++        RCC_ClockCmd(uart->rcc, ENABLE);
++    }
++
++    IO_t tx = IOGetByTag(uart->tx);
++    IO_t rx = IOGetByTag(uart->rx);
++
++    if (options & SERIAL_BIDIR) {
++        IOInit(tx, OWNER_SERIAL, RESOURCE_UART_TXRX, RESOURCE_INDEX(device));
++        IOConfigGPIOAF(tx, IOCFG_AF_PP, uart->af_tx);
++    }
++    else {
++        if (mode & MODE_TX) {
++            IOInit(tx, OWNER_SERIAL, RESOURCE_UART_TX, RESOURCE_INDEX(device));
++            IOConfigGPIOAF(tx, IOCFG_AF_PP, uart->af_tx);
++        }
++
++        if (mode & MODE_RX) {
++            IOInit(rx, OWNER_SERIAL, RESOURCE_UART_RX, RESOURCE_INDEX(device));
++            IOConfigGPIOAF(rx, IOCFG_AF_PP, uart->af_rx);
++        }
++    }
++
++    HAL_NVIC_SetPriority(uart->irq, NVIC_PRIO_SERIALUART, 0);
++    HAL_NVIC_EnableIRQ(uart->irq);
++
++    return s;
++}
++
++#ifdef USE_UART1
++uartPort_t *serialUART1(uint32_t baudRate, portMode_t mode, portOptions_t options)
++{
++    return serialUART(UARTDEV_1, baudRate, mode, options);
++}
++
++// USART1 Rx/Tx IRQ Handler
++void USART1_IRQHandler(void)
++{
++    uartPort_t *s = &(uartHardwareMap[UARTDEV_1]->port);
++    uartIrqHandler(s);
++}
++#endif
++
++#ifdef USE_UART2
++uartPort_t *serialUART2(uint32_t baudRate, portMode_t mode, portOptions_t options)
++{
++    return serialUART(UARTDEV_2, baudRate, mode, options);
++}
++
++// USART2 Rx/Tx IRQ Handler
++void USART2_IRQHandler(void)
++{
++    uartPort_t *s = &(uartHardwareMap[UARTDEV_2]->port);
++    uartIrqHandler(s);
++}
++#endif
++
++#ifdef USE_UART3
++uartPort_t *serialUART3(uint32_t baudRate, portMode_t mode, portOptions_t options)
++{
++    return serialUART(UARTDEV_3, baudRate, mode, options);
++}
++
++// USART3 Rx/Tx IRQ Handler
++void USART3_IRQHandler(void)
++{
++    uartPort_t *s = &(uartHardwareMap[UARTDEV_3]->port);
++    uartIrqHandler(s);
++}
++#endif
++
++#ifdef USE_UART4
++uartPort_t *serialUART4(uint32_t baudRate, portMode_t mode, portOptions_t options)
++{
++    return serialUART(UARTDEV_4, baudRate, mode, options);
++}
++
++// UART4 Rx/Tx IRQ Handler
++void UART4_IRQHandler(void)
++{
++    uartPort_t *s = &(uartHardwareMap[UARTDEV_4]->port);
++    uartIrqHandler(s);
++}
++#endif
++
++#ifdef USE_UART5
++uartPort_t *serialUART5(uint32_t baudRate, portMode_t mode, portOptions_t options)
++{
++    return serialUART(UARTDEV_5, baudRate, mode, options);
++}
++
++// UART5 Rx/Tx IRQ Handler
++void UART5_IRQHandler(void)
++{
++    uartPort_t *s = &(uartHardwareMap[UARTDEV_5]->port);
++    uartIrqHandler(s);
++}
++#endif
++
++#ifdef USE_UART6
++uartPort_t *serialUART6(uint32_t baudRate, portMode_t mode, portOptions_t options)
++{
++    return serialUART(UARTDEV_6, baudRate, mode, options);
++}
++
++// USART6 Rx/Tx IRQ Handler
++void USART6_IRQHandler(void)
++{
++    uartPort_t *s = &(uartHardwareMap[UARTDEV_6]->port);
++    uartIrqHandler(s);
++}
++#endif
++
++#ifdef USE_UART7
++uartPort_t *serialUART7(uint32_t baudRate, portMode_t mode, portOptions_t options)
++{
++    return serialUART(UARTDEV_7, baudRate, mode, options);
++}
++
++// UART7 Rx/Tx IRQ Handler
++void UART7_IRQHandler(void)
++{
++    uartPort_t *s = &(uartHardwareMap[UARTDEV_7]->port);
++    uartIrqHandler(s);
++}
++#endif
++
++#ifdef USE_UART8
++uartPort_t *serialUART8(uint32_t baudRate, portMode_t mode, portOptions_t options)
++{
++    return serialUART(UARTDEV_8, baudRate, mode, options);
++}
++
++// UART8 Rx/Tx IRQ Handler
++void UART8_IRQHandler(void)
++{
++    uartPort_t *s = &(uartHardwareMap[UARTDEV_8]->port);
++    uartIrqHandler(s);
++}
++#endif
+diff --git a/src/main/drivers/serial_usb_vcp.c b/src/main/drivers/serial_usb_vcp.c
+index 950cc39cd..029c44f59 100644
+--- a/src/main/drivers/serial_usb_vcp.c
++++ b/src/main/drivers/serial_usb_vcp.c
+@@ -31,7 +31,7 @@
+ #include "usb_core.h"
+ #include "usbd_cdc_vcp.h"
+ #include "usb_io.h"
+-#elif defined(STM32F7) || defined(STM32H7)
++#elif defined(STM32F7) || defined(STM32H7) || defined(STM32G4)
+ #include "vcp_hal/usbd_cdc_interface.h"
+ #include "usb_io.h"
+ USBD_HandleTypeDef USBD_Device;
+@@ -224,7 +224,7 @@ void usbVcpInitHardware(void)
+ 
+     // Register callback for DTR state changes
+     CDC_SetCtrlLineStateCb(cdcCtrlLineStateCallback, NULL);
+-#elif defined(STM32F7) || defined(STM32H7)
++#elif defined(STM32F7) || defined(STM32H7) || defined(STM32G4)
+     usbGenerateDisconnectPulse();
+ 
+     IOInit(IOGetByTag(IO_TAG(PA11)), OWNER_USB, RESOURCE_INPUT, 0);
+diff --git a/src/main/drivers/stm32g4xx_ll_ex.h b/src/main/drivers/stm32g4xx_ll_ex.h
+new file mode 100644
+index 000000000..ec7270a87
+--- /dev/null
++++ b/src/main/drivers/stm32g4xx_ll_ex.h
+@@ -0,0 +1,115 @@
++/*
++ * This file is part of Cleanflight and Betaflight.
++ *
++ * Cleanflight and Betaflight are free software. You can redistribute
++ * this software and/or modify this software under the terms of the
++ * GNU General Public License as published by the Free Software
++ * Foundation, either version 3 of the License, or (at your option)
++ * any later version.
++ *
++ * Cleanflight and Betaflight are distributed in the hope that they
++ * will be useful, but WITHOUT ANY WARRANTY; without even the implied
++ * warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
++ * See the GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this software.
++ *
++ * If not, see <http://www.gnu.org/licenses/>.
++ */
++
++#pragma once
++
++#include "stm32g4xx.h"
++#include "common/utils.h"
++
++#define DMA_CHANNEL_MASK 0xFFU
++
++// As specified in RM0440 Rev 1 "11.6 DMA registers"
++#define DMA_FIRST_CHANNEL_OFFSET 0x08U
++#define DMA_CHANNEL_SIZE 0x14U
++
++__STATIC_INLINE DMA_TypeDef *LL_EX_DMA_Channel_to_DMA(DMA_Channel_TypeDef *DMAx_Channely)
++{
++    // clear channel address
++    return (DMA_TypeDef *) (((uint32_t) DMAx_Channely) & ((uint32_t) ~DMA_CHANNEL_MASK));
++}
++
++__STATIC_INLINE uint32_t LL_EX_DMA_Channel_to_Channel(DMA_Channel_TypeDef *DMAx_Channely)
++{
++
++    return (((uint32_t) DMAx_Channely & DMA_CHANNEL_MASK) - DMA_FIRST_CHANNEL_OFFSET) / DMA_CHANNEL_SIZE + 1;
++}
++
++#undef DMA_CHANNEL_MASK
++#undef DMA_FIRST_CHANNEL_OFFSET
++#undef DMA_CHANNEL_SIZE
++
++__STATIC_INLINE uint32_t LL_EX_DMA_Init(DMA_Channel_TypeDef *DMAx_Channely, LL_DMA_InitTypeDef *DMA_InitStruct)
++{
++    DMA_TypeDef *DMA = LL_EX_DMA_Channel_to_DMA(DMAx_Channely);
++    const uint32_t Channel = LL_EX_DMA_Channel_to_Channel(DMAx_Channely);
++
++    return LL_DMA_Init(DMA, Channel, DMA_InitStruct);
++}
++
++__STATIC_INLINE uint32_t LL_EX_DMA_DeInit(DMA_Channel_TypeDef *DMAx_Channely)
++{
++    DMA_TypeDef *DMA = LL_EX_DMA_Channel_to_DMA(DMAx_Channely);
++    const uint32_t Channel = LL_EX_DMA_Channel_to_Channel(DMAx_Channely);
++
++    return LL_DMA_DeInit(DMA, Channel);
++}
++
++__STATIC_INLINE void LL_EX_DMA_EnableResource(DMA_Channel_TypeDef *DMAx_Channely)
++{
++    SET_BIT(DMAx_Channely->CCR, DMA_CCR_EN);
++}
++
++__STATIC_INLINE void LL_EX_DMA_DisableResource(DMA_Channel_TypeDef *DMAx_Channely)
++{
++    CLEAR_BIT(DMAx_Channely->CCR, DMA_CCR_EN);
++}
++
++__STATIC_INLINE void LL_EX_DMA_EnableIT_TC(DMA_Channel_TypeDef *DMAx_Channely)
++{
++    SET_BIT(DMAx_Channely->CCR, DMA_CCR_TCIE);
++}
++
++__STATIC_INLINE void LL_EX_DMA_SetDataLength(DMA_Channel_TypeDef* DMAx_Channely, uint32_t NbData)
++{
++    MODIFY_REG(DMAx_Channely->CNDTR, DMA_CNDTR_NDT, NbData);
++}
++
++__STATIC_INLINE uint32_t LL_EX_DMA_GetDataLength(DMA_Channel_TypeDef* DMAx_Channely)
++{
++    return READ_BIT(DMAx_Channely->CNDTR, DMA_CNDTR_NDT);
++}
++
++__STATIC_INLINE void LL_EX_TIM_EnableIT(TIM_TypeDef *TIMx, uint32_t Sources)
++{
++    SET_BIT(TIMx->DIER, Sources);
++}
++
++__STATIC_INLINE void LL_EX_TIM_DisableIT(TIM_TypeDef *TIMx, uint32_t Sources)
++{
++    CLEAR_BIT(TIMx->DIER, Sources);
++}
++
++__STATIC_INLINE void LL_EX_TIM_CC_EnableNChannel(TIM_TypeDef *TIMx, uint32_t Channel)
++{
++    LL_TIM_CC_EnableChannel(TIMx, 4 * Channel);
++}
++
++/* INAV uses the H7 stream naming in its generic HAL timer driver. */
++#define LL_DMA_STREAM_0 LL_DMA_CHANNEL_1
++#define LL_DMA_STREAM_1 LL_DMA_CHANNEL_2
++#define LL_DMA_STREAM_2 LL_DMA_CHANNEL_3
++#define LL_DMA_STREAM_3 LL_DMA_CHANNEL_4
++#define LL_DMA_STREAM_4 LL_DMA_CHANNEL_5
++#define LL_DMA_STREAM_5 LL_DMA_CHANNEL_6
++#define LL_DMA_STREAM_6 LL_DMA_CHANNEL_7
++#define LL_DMA_STREAM_7 LL_DMA_CHANNEL_8
++#define LL_DMA_EnableStream LL_DMA_EnableChannel
++#define LL_DMA_DisableStream LL_DMA_DisableChannel
++#define LL_DMA_IsEnabledStream LL_DMA_IsEnabledChannel
+diff --git a/src/main/drivers/system.c b/src/main/drivers/system.c
+index 6291e6a20..a75f54f37 100644
+--- a/src/main/drivers/system.c
++++ b/src/main/drivers/system.c
+@@ -29,7 +29,7 @@
+ #include "drivers/system.h"
+ #include "drivers/time.h"
+ 
+-#if defined(STM32F4) || defined(STM32F7) || defined(STM32H7)||defined(AT32F43x)
++#if defined(STM32F4) || defined(STM32F7) || defined(STM32H7) || defined(STM32G4) || defined(AT32F43x)
+ // See "RM CoreSight Architecture Specification"
+ // B2.3.10  "LSR and LAR, Software Lock Status Register and Software Lock Access Register"
+ // "E1.2.11  LAR, Lock Access Register"
+diff --git a/src/main/drivers/system_stm32g4xx.c b/src/main/drivers/system_stm32g4xx.c
+new file mode 100644
+index 000000000..63e5a3715
+--- /dev/null
++++ b/src/main/drivers/system_stm32g4xx.c
+@@ -0,0 +1,54 @@
++/*
++ * STM32G4 system support for INAV.
++ */
++
++#include <string.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdlib.h>
++
++#include "platform.h"
++
++#include "drivers/accgyro/accgyro_mpu.h"
++#include "drivers/exti.h"
++#include "drivers/nvic.h"
++#include "drivers/system.h"
++
++void SystemClock_Config(void);
++
++void enableGPIOPowerUsageAndNoiseReductions(void)
++{
++    __HAL_RCC_SYSCFG_CLK_ENABLE();
++    __HAL_RCC_PWR_CLK_ENABLE();
++}
++
++bool isMPUSoftReset(void)
++{
++    return (cachedRccCsrValue & RCC_CSR_SFTRSTF) != 0U;
++}
++
++uint32_t systemBootloaderAddress(void)
++{
++    return 0x1FFF0000;
++}
++
++void forcedSystemResetWithoutDisablingCaches(void)
++{
++    __disable_irq();
++    NVIC_SystemReset();
++}
++
++void systemInit(void)
++{
++    checkForBootLoaderRequest();
++    HAL_NVIC_SetPriorityGrouping(NVIC_PRIORITY_GROUPING);
++
++    cachedRccCsrValue = RCC->CSR;
++
++    enableGPIOPowerUsageAndNoiseReductions();
++
++    cycleCounterInit();
++
++    HAL_SYSTICK_Config(SystemCoreClock / 1000U);
++    HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
++}
+\ No newline at end of file
+diff --git a/src/main/drivers/timer.h b/src/main/drivers/timer.h
+index 05cef1e22..577f7c89e 100644
+--- a/src/main/drivers/timer.h
++++ b/src/main/drivers/timer.h
+@@ -31,7 +31,7 @@
+ 
+ typedef uint16_t captureCompare_t;        // 16 bit on both 103 and 303, just register access must be 32bit sometimes (use timCCR_t)
+ 
+-#if defined(STM32F4) || defined(STM32F7) || defined(STM32H7)|| defined(AT32F43x)
++#if defined(STM32F4) || defined(STM32F7) || defined(STM32H7) || defined(STM32G4) || defined(AT32F43x)
+ typedef uint32_t timCCR_t;
+ typedef uint32_t timCCER_t;
+ typedef uint32_t timSR_t;
+@@ -68,6 +68,9 @@ typedef uint32_t timCNT_t;
+ #elif defined(STM32H7)
+ #define HARDWARE_TIMER_DEFINITION_COUNT 14
+ #define TIMER_INDEX(n)                  ((n) < 9 ? (n) - 1 : (n) - 4)   // TIM1..TIM8, TIM12..TIM17
++#elif defined(STM32G4)
++#define HARDWARE_TIMER_DEFINITION_COUNT 12
++#define TIMER_INDEX(n)                  ((n) < 9 ? (n) - 1 : ((n) < 20 ? (n) - 7 : 11)) // TIM1..TIM8, TIM15..TIM17, TIM20
+ #elif defined(AT32F43x)
+ #define HARDWARE_TIMER_DEFINITION_COUNT 15
+ #define TIMER_INDEX(n)                  ((n) < 20 ? (n) - 1 : 14)       // TMR1..TMR14, TMR20
+diff --git a/src/main/drivers/timer_def.h b/src/main/drivers/timer_def.h
+index 752af85b4..d9cb2395d 100644
+--- a/src/main/drivers/timer_def.h
++++ b/src/main/drivers/timer_def.h
+@@ -79,6 +79,7 @@
+ #define BTCH_TIM8_CH1N BTCH_TIM8_CH1
+ #define BTCH_TIM8_CH2N BTCH_TIM8_CH2
+ #define BTCH_TIM8_CH3N BTCH_TIM8_CH3
++#define BTCH_TIM8_CH4N BTCH_TIM8_CH4
+ 
+ #define BTCH_TIM20_CH1N BTCH_TIM20_CH1
+ #define BTCH_TIM20_CH2N BTCH_TIM20_CH2
+@@ -105,6 +106,8 @@
+     #include "timer_def_stm32f7xx.h"
+ #elif defined(STM32H7)
+     #include "timer_def_stm32h7xx.h"
++#elif defined(STM32G4)
++    #include "timer_def_stm32g4xx.h"
+ #elif defined(AT32F43x)
+     #include "timer_def_at32f43x.h"
+ #elif defined(SITL_BUILD)
+diff --git a/src/main/drivers/timer_def_stm32g4xx.h b/src/main/drivers/timer_def_stm32g4xx.h
+new file mode 100644
+index 000000000..7f0f677cd
+--- /dev/null
++++ b/src/main/drivers/timer_def_stm32g4xx.h
+@@ -0,0 +1,235 @@
++/*
++ * This file is part of INAV.
++ *
++ * INAV is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * INAV is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with INAV.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++#pragma once
++
++#define timerDMASafeType_t  uint32_t
++
++#define DEF_TIM_DMAMAP__D(dma, stream, request) DMA_TAG(dma, stream, request)
++#define DEF_TIM_DMAMAP__NONE                    DMA_NONE
++
++#define DEF_TIM(tim, ch, pin, usage, flags, dmavar) {   \
++    tim,                                                \
++    IO_TAG(pin),                                        \
++    DEF_TIM_CHNL_ ## ch,                                \
++    DEF_TIM_OUTPUT(ch) | flags,                         \
++    IOCFG_AF_PP,                                        \
++    DEF_TIM_AF(TCH_## tim ## _ ## ch, pin),             \
++    usage,                                              \
++    DEF_TIM_DMAMAP(dmavar, tim ## _ ## ch)              \
++}
++
++// AF mappings
++#define DEF_TIM_AF(timch, pin)        CONCAT(DEF_TIM_AF__, DEF_TIM_AF__ ## pin ## __ ## timch)
++#define DEF_TIM_AF__D(af_n, tim_n)    GPIO_AF ## af_n ## _TIM ## tim_n
++
++/* H7 Stream Mappings */
++// D(DMAx, Stream)
++
++// H7 has DMAMUX that allow arbitrary assignment of peripherals to streams.
++
++#define DEF_TIM_DMA_FULL(req) \
++    D(1, 0, req), D(1, 1, req), D(1, 2, req), D(1, 3, req), D(1, 4, req), D(1, 5, req), D(1, 6, req), D(1, 7, req), \
++    D(2, 0, req), D(2, 1, req), D(2, 2, req), D(2, 3, req), D(2, 4, req), D(2, 5, req), D(2, 6, req), D(2, 7, req)
++
++#define DEF_TIM_DMA__BTCH_TIM1_CH1    DEF_TIM_DMA_FULL(DMA_REQUEST_TIM1_CH1)
++#define DEF_TIM_DMA__BTCH_TIM1_CH2    DEF_TIM_DMA_FULL(DMA_REQUEST_TIM1_CH2)
++#define DEF_TIM_DMA__BTCH_TIM1_CH3    DEF_TIM_DMA_FULL(DMA_REQUEST_TIM1_CH3)
++#define DEF_TIM_DMA__BTCH_TIM1_CH4    DEF_TIM_DMA_FULL(DMA_REQUEST_TIM1_CH4)
++
++#define DEF_TIM_DMA__BTCH_TIM2_CH1    DEF_TIM_DMA_FULL(DMA_REQUEST_TIM2_CH1)
++#define DEF_TIM_DMA__BTCH_TIM2_CH2    DEF_TIM_DMA_FULL(DMA_REQUEST_TIM2_CH2)
++#define DEF_TIM_DMA__BTCH_TIM2_CH3    DEF_TIM_DMA_FULL(DMA_REQUEST_TIM2_CH3)
++#define DEF_TIM_DMA__BTCH_TIM2_CH4    DEF_TIM_DMA_FULL(DMA_REQUEST_TIM2_CH4)
++
++#define DEF_TIM_DMA__BTCH_TIM3_CH1    DEF_TIM_DMA_FULL(DMA_REQUEST_TIM3_CH1)
++#define DEF_TIM_DMA__BTCH_TIM3_CH2    DEF_TIM_DMA_FULL(DMA_REQUEST_TIM3_CH2)
++#define DEF_TIM_DMA__BTCH_TIM3_CH3    DEF_TIM_DMA_FULL(DMA_REQUEST_TIM3_CH3)
++#define DEF_TIM_DMA__BTCH_TIM3_CH4    DEF_TIM_DMA_FULL(DMA_REQUEST_TIM3_CH4)
++
++#define DEF_TIM_DMA__BTCH_TIM4_CH1    DEF_TIM_DMA_FULL(DMA_REQUEST_TIM4_CH1)
++#define DEF_TIM_DMA__BTCH_TIM4_CH2    DEF_TIM_DMA_FULL(DMA_REQUEST_TIM4_CH2)
++#define DEF_TIM_DMA__BTCH_TIM4_CH3    DEF_TIM_DMA_FULL(DMA_REQUEST_TIM4_CH3)
++
++#ifdef USE_DSHOT_DMAR
++// Workaround because DMA_REQUEST_TIM4_CH4 does not exist
++#define DEF_TIM_DMA__BTCH_TIM4_CH4    DEF_TIM_DMA_FULL(DMA_REQUEST_TIM4_UP)
++#else
++#define DEF_TIM_DMA__BTCH_TIM4_CH4    NONE
++#endif
++
++#define DEF_TIM_DMA__BTCH_TIM5_CH1    DEF_TIM_DMA_FULL(DMA_REQUEST_TIM5_CH1)
++#define DEF_TIM_DMA__BTCH_TIM5_CH2    DEF_TIM_DMA_FULL(DMA_REQUEST_TIM5_CH2)
++#define DEF_TIM_DMA__BTCH_TIM5_CH3    DEF_TIM_DMA_FULL(DMA_REQUEST_TIM5_CH3)
++#define DEF_TIM_DMA__BTCH_TIM5_CH4    DEF_TIM_DMA_FULL(DMA_REQUEST_TIM5_CH4)
++
++#define DEF_TIM_DMA__BTCH_TIM8_CH1    DEF_TIM_DMA_FULL(DMA_REQUEST_TIM8_CH1)
++#define DEF_TIM_DMA__BTCH_TIM8_CH2    DEF_TIM_DMA_FULL(DMA_REQUEST_TIM8_CH2)
++#define DEF_TIM_DMA__BTCH_TIM8_CH3    DEF_TIM_DMA_FULL(DMA_REQUEST_TIM8_CH3)
++#define DEF_TIM_DMA__BTCH_TIM8_CH4    DEF_TIM_DMA_FULL(DMA_REQUEST_TIM8_CH4)
++
++#define DEF_TIM_DMA__BTCH_TIM12_CH1   NONE
++#define DEF_TIM_DMA__BTCH_TIM12_CH2   NONE
++
++#define DEF_TIM_DMA__BTCH_TIM13_CH1   NONE
++
++#define DEF_TIM_DMA__BTCH_TIM14_CH1   NONE
++
++#define DEF_TIM_DMA__BTCH_TIM15_CH1   DEF_TIM_DMA_FULL(DMA_REQUEST_TIM15_CH1)
++#define DEF_TIM_DMA__BTCH_TIM15_CH2   NONE
++
++#define DEF_TIM_DMA__BTCH_TIM16_CH1   DEF_TIM_DMA_FULL(DMA_REQUEST_TIM16_CH1)
++#define DEF_TIM_DMA__BTCH_TIM16_CH1N  NONE
++
++#define DEF_TIM_DMA__BTCH_TIM17_CH1   DEF_TIM_DMA_FULL(DMA_REQUEST_TIM17_CH1)
++#define DEF_TIM_DMA__BTCH_TIM17_CH1N  NONE
++
++// TIM_UP table
++#define DEF_TIM_DMA__BTCH_TIM1_UP     DEF_TIM_DMA_FULL(DMA_REQUEST_TIM1_UP)
++#define DEF_TIM_DMA__BTCH_TIM2_UP     DEF_TIM_DMA_FULL(DMA_REQUEST_TIM2_UP)
++#define DEF_TIM_DMA__BTCH_TIM3_UP     DEF_TIM_DMA_FULL(DMA_REQUEST_TIM3_UP)
++#define DEF_TIM_DMA__BTCH_TIM4_UP     DEF_TIM_DMA_FULL(DMA_REQUEST_TIM4_UP)
++#define DEF_TIM_DMA__BTCH_TIM5_UP     DEF_TIM_DMA_FULL(DMA_REQUEST_TIM5_UP)
++#define DEF_TIM_DMA__BTCH_TIM6_UP     DEF_TIM_DMA_FULL(DMA_REQUEST_TIM6_UP)
++#define DEF_TIM_DMA__BTCH_TIM7_UP     DEF_TIM_DMA_FULL(DMA_REQUEST_TIM7_UP)
++#define DEF_TIM_DMA__BTCH_TIM8_UP     DEF_TIM_DMA_FULL(DMA_REQUEST_TIM8_UP)
++#define DEF_TIM_DMA__BTCH_TIM12_UP    NONE
++#define DEF_TIM_DMA__BTCH_TIM13_UP    NONE
++#define DEF_TIM_DMA__BTCH_TIM14_UP    NONE
++#define DEF_TIM_DMA__BTCH_TIM15_UP    DEF_TIM_DMA_FULL(DMA_REQUEST_TIM15_UP)
++#define DEF_TIM_DMA__BTCH_TIM16_UP    DEF_TIM_DMA_FULL(DMA_REQUEST_TIM16_UP)
++#define DEF_TIM_DMA__BTCH_TIM17_UP    DEF_TIM_DMA_FULL(DMA_REQUEST_TIM17_UP)
++
++// AF table
++
++// AF table
++
++//PORTA
++#define DEF_TIM_AF__PA0__TCH_TIM2_CH1     D(1, 2)
++#define DEF_TIM_AF__PA1__TCH_TIM2_CH2     D(1, 2)
++#define DEF_TIM_AF__PA2__TCH_TIM2_CH3     D(1, 2)
++#define DEF_TIM_AF__PA3__TCH_TIM2_CH4     D(1, 2)
++#define DEF_TIM_AF__PA5__TCH_TIM2_CH1     D(1, 2)
++#define DEF_TIM_AF__PA7__TCH_TIM1_CH1N    D(1, 1)
++#define DEF_TIM_AF__PA8__TCH_TIM1_CH1     D(6, 1)
++#define DEF_TIM_AF__PA9__TCH_TIM1_CH2     D(1, 1)
++#define DEF_TIM_AF__PA10__TCH_TIM1_CH3    D(1, 1)
++#define DEF_TIM_AF__PA11__TCH_TIM1_CH4    D(1, 1)
++#define DEF_TIM_AF__PA15__TCH_TIM2_CH1    D(1, 2)
++
++#define DEF_TIM_AF__PA0__TCH_TIM5_CH1     D(2, 5)
++#define DEF_TIM_AF__PA1__TCH_TIM5_CH2     D(2, 5)
++#define DEF_TIM_AF__PA2__TCH_TIM5_CH3     D(2, 5)
++#define DEF_TIM_AF__PA3__TCH_TIM5_CH4     D(2, 5)
++#define DEF_TIM_AF__PA6__TCH_TIM3_CH1     D(2, 3)
++#define DEF_TIM_AF__PA7__TCH_TIM3_CH2     D(2, 3)
++
++#define DEF_TIM_AF__PA5__TCH_TIM8_CH1N    D(3, 8)
++#define DEF_TIM_AF__PA7__TCH_TIM8_CH1N    D(3, 8)
++
++#define DEF_TIM_AF__PA6__TCH_TIM13_CH1    D(9, 13)
++#define DEF_TIM_AF__PA7__TCH_TIM14_CH1    D(9, 14)
++
++#define DEF_TIM_AF__PA1__TCH_TIM15_CH1N   D(4, 15)
++#define DEF_TIM_AF__PA2__TCH_TIM15_CH1    D(4, 15)
++#define DEF_TIM_AF__PA3__TCH_TIM15_CH2    D(4, 15)
++
++//PORTB
++#define DEF_TIM_AF__PB2__TCH_TIM5_CH1     D(2, 5)
++#define DEF_TIM_AF__PB0__TCH_TIM1_CH2N    D(1, 1)
++#define DEF_TIM_AF__PB1__TCH_TIM1_CH3N    D(1, 1)
++#define DEF_TIM_AF__PB3__TCH_TIM2_CH2     D(1, 2)
++#define DEF_TIM_AF__PB6__TCH_TIM8_CH1     D(5, 8)
++#define DEF_TIM_AF__PB6__TCH_TIM16_CH1N   D(1, 16)
++#define DEF_TIM_AF__PB7__TCH_TIM17_CH1N   D(1, 17)
++#define DEF_TIM_AF__PB8__TCH_TIM16_CH1    D(1, 16)
++#define DEF_TIM_AF__PB9__TCH_TIM17_CH1    D(1, 17)
++#define DEF_TIM_AF__PB10__TCH_TIM2_CH3    D(1, 2)
++#define DEF_TIM_AF__PB11__TCH_TIM2_CH4    D(1, 2)
++#define DEF_TIM_AF__PB13__TCH_TIM1_CH1N   D(1, 1)
++#define DEF_TIM_AF__PB14__TCH_TIM1_CH2N   D(1, 1)
++#define DEF_TIM_AF__PB15__TCH_TIM1_CH3N   D(1, 1)
++
++#define DEF_TIM_AF__PB0__TCH_TIM3_CH3     D(2, 3)
++#define DEF_TIM_AF__PB1__TCH_TIM3_CH4     D(2, 3)
++#define DEF_TIM_AF__PB4__TCH_TIM3_CH1     D(2, 3)
++#define DEF_TIM_AF__PB5__TCH_TIM3_CH2     D(2, 3)
++#define DEF_TIM_AF__PB6__TCH_TIM4_CH1     D(2, 4)
++#define DEF_TIM_AF__PB7__TCH_TIM4_CH2     D(2, 4)
++#define DEF_TIM_AF__PB8__TCH_TIM4_CH3     D(2, 4)
++#define DEF_TIM_AF__PB9__TCH_TIM4_CH4     D(2, 4)
++
++#define DEF_TIM_AF__PB14__TCH_TIM12_CH1   D(2, 12)
++#define DEF_TIM_AF__PB15__TCH_TIM12_CH2   D(2, 12)
++
++//PORTC
++#define DEF_TIM_AF__PC6__TCH_TIM3_CH1     D(2, 3)
++#define DEF_TIM_AF__PC7__TCH_TIM3_CH2     D(2, 3)
++#define DEF_TIM_AF__PC8__TCH_TIM3_CH3     D(2, 3)
++#define DEF_TIM_AF__PC9__TCH_TIM3_CH4     D(2, 3)
++
++#define DEF_TIM_AF__PC6__TCH_TIM8_CH1     D(3, 8)
++#define DEF_TIM_AF__PC7__TCH_TIM8_CH2     D(3, 8)
++#define DEF_TIM_AF__PC8__TCH_TIM8_CH3     D(3, 8)
++#define DEF_TIM_AF__PC9__TCH_TIM8_CH4     D(3, 8)
++
++//PORTD
++#define DEF_TIM_AF__PD12__TCH_TIM4_CH1    D(2, 4)
++#define DEF_TIM_AF__PD13__TCH_TIM4_CH2    D(2, 4)
++#define DEF_TIM_AF__PD14__TCH_TIM4_CH3    D(2, 4)
++#define DEF_TIM_AF__PD15__TCH_TIM4_CH4    D(2, 4)
++
++//PORTE
++#define DEF_TIM_AF__PE8__TCH_TIM1_CH1N    D(1, 1)
++#define DEF_TIM_AF__PE9__TCH_TIM1_CH1     D(1, 1)
++#define DEF_TIM_AF__PE10__TCH_TIM1_CH2N   D(1, 1)
++#define DEF_TIM_AF__PE11__TCH_TIM1_CH2    D(1, 1)
++#define DEF_TIM_AF__PE12__TCH_TIM1_CH3N   D(1, 1)
++#define DEF_TIM_AF__PE13__TCH_TIM1_CH3    D(1, 1)
++#define DEF_TIM_AF__PE14__TCH_TIM1_CH4    D(1, 1)
++
++#define DEF_TIM_AF__PE4__TCH_TIM15_CH1N   D(4, 15)
++#define DEF_TIM_AF__PE5__TCH_TIM15_CH1    D(4, 15)
++#define DEF_TIM_AF__PE6__TCH_TIM15_CH2    D(4, 15)
++
++//PORTF
++#define DEF_TIM_AF__PF6__TCH_TIM16_CH1    D(1, 16)
++#define DEF_TIM_AF__PF7__TCH_TIM17_CH1    D(1, 17)
++#define DEF_TIM_AF__PF8__TCH_TIM16_CH1N   D(1, 16)
++#define DEF_TIM_AF__PF9__TCH_TIM17_CH1N   D(1, 17)
++
++#define DEF_TIM_AF__PF8__TCH_TIM13_CH1N   D(9, 13)
++#define DEF_TIM_AF__PF9__TCH_TIM14_CH1N   D(9, 14)
++
++//PORTH
++#define DEF_TIM_AF__PH6__TCH_TIM12_CH1    D(2, 12)
++#define DEF_TIM_AF__PH9__TCH_TIM12_CH2    D(2, 12)
++#define DEF_TIM_AF__PH10__TCH_TIM5_CH1    D(2, 5)
++#define DEF_TIM_AF__PH11__TCH_TIM5_CH2    D(2, 5)
++#define DEF_TIM_AF__PH12__TCH_TIM5_CH3    D(2, 5)
++#define DEF_TIM_AF__PH13__TCH_TIM8_CH1N   D(3, 8)
++#define DEF_TIM_AF__PH14__TCH_TIM8_CH2N   D(3, 8)
++#define DEF_TIM_AF__PH15__TCH_TIM8_CH3N   D(3, 8)
++
++//PORTI
++#define DEF_TIM_AF__PI0__TCH_TIM5_CH4     D(2, 5)
++
++#define DEF_TIM_AF__PI2__TCH_TIM8_CH4     D(3, 8)
++#define DEF_TIM_AF__PI5__TCH_TIM8_CH1     D(3, 8)
++#define DEF_TIM_AF__PI6__TCH_TIM8_CH2     D(3, 8)
++#define DEF_TIM_AF__PI7__TCH_TIM8_CH3     D(3, 8)
++#define DEF_TIM_AF__PC13__TCH_TIM8_CH4N    D(6, 8)
+diff --git a/src/main/drivers/timer_impl_hal.c b/src/main/drivers/timer_impl_hal.c
+index 468b415cd..825e32415 100644
+--- a/src/main/drivers/timer_impl_hal.c
++++ b/src/main/drivers/timer_impl_hal.c
+@@ -417,10 +417,12 @@ bool impl_timerPWMConfigChannelDMA(TCH_t * tch, void * dmaBuffer, uint8_t dmaBuf
+     init.Direction = LL_DMA_DIRECTION_MEMORY_TO_PERIPH;
+     init.Mode = LL_DMA_MODE_NORMAL;
+     init.Priority = LL_DMA_PRIORITY_HIGH;
++#if !defined(STM32G4)
+     init.FIFOMode = LL_DMA_FIFOMODE_ENABLE;
+     init.FIFOThreshold = LL_DMA_FIFOTHRESHOLD_FULL;
+     init.MemBurst = LL_DMA_MBURST_SINGLE;
+     init.PeriphBurst = LL_DMA_PBURST_SINGLE;
++#endif
+ 
+     dmaInit(tch->dma, OWNER_TIMER, 0);
+     dmaSetHandler(tch->dma, impl_timerDMA_IRQHandler, NVIC_PRIO_TIMER_DMA, (uint32_t)tch);
+diff --git a/src/main/drivers/timer_stm32g4xx.c b/src/main/drivers/timer_stm32g4xx.c
+new file mode 100644
+index 000000000..00dbbd064
+--- /dev/null
++++ b/src/main/drivers/timer_stm32g4xx.c
+@@ -0,0 +1,67 @@
++/*
++ * STM32G4 timer definitions for INAV.
++ */
++
++#include <stdbool.h>
++#include <stdint.h>
++
++#include "platform.h"
++
++#include "common/utils.h"
++
++#include "drivers/io.h"
++#include "drivers/rcc.h"
++#include "drivers/time.h"
++#include "drivers/nvic.h"
++#include "drivers/timer.h"
++#include "drivers/timer_impl.h"
++
++#include "stm32g4xx.h"
++
++const timerDef_t timerDefinitions[HARDWARE_TIMER_DEFINITION_COUNT] = {
++    [TIMER_INDEX(1)]  = { .tim = TIM1,  .rcc = RCC_APB2(TIM1),  .irq = TIM1_CC_IRQn },
++    [TIMER_INDEX(2)]  = { .tim = TIM2,  .rcc = RCC_APB1(TIM2),  .irq = TIM2_IRQn },
++    [TIMER_INDEX(3)]  = { .tim = TIM3,  .rcc = RCC_APB1(TIM3),  .irq = TIM3_IRQn },
++    [TIMER_INDEX(4)]  = { .tim = TIM4,  .rcc = RCC_APB1(TIM4),  .irq = TIM4_IRQn },
++    [TIMER_INDEX(5)]  = { .tim = TIM5,  .rcc = RCC_APB1(TIM5),  .irq = TIM5_IRQn },
++    [TIMER_INDEX(6)]  = { .tim = TIM6,  .rcc = RCC_APB1(TIM6),  .irq = 0 },
++    [TIMER_INDEX(7)]  = { .tim = TIM7,  .rcc = RCC_APB1(TIM7),  .irq = 0 },
++    [TIMER_INDEX(8)]  = { .tim = TIM8,  .rcc = RCC_APB2(TIM8),  .irq = TIM8_CC_IRQn },
++    [TIMER_INDEX(15)] = { .tim = TIM15, .rcc = RCC_APB2(TIM15), .irq = TIM1_BRK_TIM15_IRQn },
++    [TIMER_INDEX(16)] = { .tim = TIM16, .rcc = RCC_APB2(TIM16), .irq = TIM1_UP_TIM16_IRQn },
++    [TIMER_INDEX(17)] = { .tim = TIM17, .rcc = RCC_APB2(TIM17), .irq = TIM1_TRG_COM_TIM17_IRQn },
++    [TIMER_INDEX(20)] = { .tim = TIM20, .rcc = RCC_APB2(TIM20), .irq = TIM20_CC_IRQn },
++};
++
++STATIC_ASSERT(TIMER_INDEX(20) == HARDWARE_TIMER_DEFINITION_COUNT - 1, timer_definition_table_size_mismatch);
++
++uint32_t timerClock(TIM_TypeDef *tim)
++{
++    uint32_t pclk;
++
++    if (tim == TIM1 || tim == TIM8 || tim == TIM15 || tim == TIM16 || tim == TIM17 || tim == TIM20) {
++        pclk = HAL_RCC_GetPCLK2Freq();
++        if (READ_BIT(RCC->CFGR, RCC_CFGR_PPRE2) != 0U) {
++            pclk *= 2U;
++        }
++    }
++    else {
++        pclk = HAL_RCC_GetPCLK1Freq();
++        if (READ_BIT(RCC->CFGR, RCC_CFGR_PPRE1) != 0U) {
++            pclk *= 2U;
++        }
++    }
++
++    return pclk;
++}
++
++_TIM_IRQ_HANDLER(TIM1_CC_IRQHandler, 1);
++_TIM_IRQ_HANDLER(TIM2_IRQHandler, 2);
++_TIM_IRQ_HANDLER(TIM3_IRQHandler, 3);
++_TIM_IRQ_HANDLER(TIM4_IRQHandler, 4);
++_TIM_IRQ_HANDLER(TIM5_IRQHandler, 5);
++_TIM_IRQ_HANDLER(TIM8_CC_IRQHandler, 8);
++_TIM_IRQ_HANDLER(TIM1_BRK_TIM15_IRQHandler, 15);
++_TIM_IRQ_HANDLER(TIM1_UP_TIM16_IRQHandler, 16);
++_TIM_IRQ_HANDLER(TIM1_TRG_COM_TIM17_IRQHandler, 17);
++_TIM_IRQ_HANDLER(TIM20_CC_IRQHandler, 20);
+\ No newline at end of file
+diff --git a/src/main/fc/cli.c b/src/main/fc/cli.c
+index 73c65919b..1b6da7b85 100644
+--- a/src/main/fc/cli.c
++++ b/src/main/fc/cli.c
+@@ -147,7 +147,8 @@ extern char *bootlog_head;
+ static serialPort_t *cliPort;
+ 
+ static bufWriter_t *cliWriter;
+-static uint8_t cliWriteBuffer[sizeof(*cliWriter) + 128];
++// bufWriterInit() casts this storage to bufWriter_t, so keep it word-aligned.
++static uint8_t cliWriteBuffer[sizeof(*cliWriter) + 128] __attribute__((aligned(4)));
+ 
+ static char cliBuffer[64];
+ static uint32_t bufferIndex = 0;
+diff --git a/src/main/platform.h b/src/main/platform.h
+index ba8689d1d..2674f5874 100644
+--- a/src/main/platform.h
++++ b/src/main/platform.h
+@@ -17,6 +17,8 @@
+ 
+ #pragma once
+ 
++#define DMA_DATA_ZERO_INIT
++
+ #if defined(STM32H7)
+ #include "stm32h7xx.h"
+ #include "stm32h7xx_hal.h"
+@@ -35,6 +37,23 @@
+ #define U_ID_1 (*(uint32_t*)(UID_BASE + 4))
+ #define U_ID_2 (*(uint32_t*)(UID_BASE + 8))
+ 
++#elif defined(STM32G4)
++#include "stm32g4xx.h"
++#include "stm32g4xx_hal.h"
++#include "system_stm32g4xx.h"
++
++#include "stm32g4xx_ll_spi.h"
++#include "stm32g4xx_ll_gpio.h"
++#include "stm32g4xx_ll_dma.h"
++#include "stm32g4xx_ll_rcc.h"
++#include "stm32g4xx_ll_bus.h"
++#include "stm32g4xx_ll_tim.h"
++#include "drivers/stm32g4xx_ll_ex.h"
++
++#define U_ID_0 (*(uint32_t*)UID_BASE)
++#define U_ID_1 (*(uint32_t*)(UID_BASE + 4))
++#define U_ID_2 (*(uint32_t*)(UID_BASE + 8))
++
+ #elif defined(STM32F7)
+ #include "stm32f7xx.h"
+ #include "stm32f7xx_hal.h"
+diff --git a/src/main/startup/startup_stm32g474xx.s b/src/main/startup/startup_stm32g474xx.s
+new file mode 100644
+index 000000000..30cdc69b8
+--- /dev/null
++++ b/src/main/startup/startup_stm32g474xx.s
+@@ -0,0 +1,608 @@
++/**
++  ******************************************************************************
++  * @file      startup_stm32g474xx.s
++  * @author    MCD Application Team
++  * @brief     STM32G474xx devices vector table GCC toolchain.
++  *            This module performs:
++  *                - Set the initial SP
++  *                - Set the initial PC == Reset_Handler,
++  *                - Set the vector table entries with the exceptions ISR address,
++  *                - Configure the clock system
++  *                - Branches to main in the C library (which eventually
++  *                  calls main()).
++  *            After Reset the Cortex-M4 processor is in Thread mode,
++  *            priority is Privileged, and the Stack is set to Main.
++  ******************************************************************************
++  * @attention
++  *
++  * <h2><center>&copy; Copyright (c) 2017 STMicroelectronics.
++  * All rights reserved.</center></h2>
++  *
++  * This software component is licensed by ST under BSD 3-Clause license,
++  * the "License"; You may not use this file except in compliance with the
++  * License. You may obtain a copy of the License at:
++  *                        opensource.org/licenses/BSD-3-Clause
++  *
++  ******************************************************************************
++  */
++
++  .syntax unified
++	.cpu cortex-m4
++	.fpu softvfp
++	.thumb
++
++.global	g_pfnVectors
++.global	Default_Handler
++
++/* start address for the initialization values of the .data section.
++defined in linker script */
++.word	_sidata
++/* start address for the .data section. defined in linker script */
++.word	_sdata
++/* end address for the .data section. defined in linker script */
++.word	_edata
++/* start address for the .bss section. defined in linker script */
++.word	_sbss
++/* end address for the .bss section. defined in linker script */
++.word	_ebss
++
++.equ  BootRAM,        0xF1E0F85F
++/**
++ * @brief  This is the code that gets called when the processor first
++ *          starts execution following a reset event. Only the absolutely
++ *          necessary set is performed, after which the application
++ *          supplied main() routine is called.
++ * @param  None
++ * @retval : None
++*/
++
++    .section	.text.Reset_Handler
++	.weak	Reset_Handler
++	.type	Reset_Handler, %function
++Reset_Handler:
++  ldr   r0, =_estack
++  mov   sp, r0          /* set stack pointer */
++
++  bl persistentObjectInit
++
++/* Copy the data segment initializers from flash to SRAM */
++  ldr r0, =_sdata
++  ldr r1, =_edata
++  ldr r2, =_sidata
++  movs r3, #0
++  b	LoopCopyDataInit
++
++CopyDataInit:
++  ldr r4, [r2, r3]
++  str r4, [r0, r3]
++  adds r3, r3, #4
++
++LoopCopyDataInit:
++  adds r4, r0, r3
++  cmp r4, r1
++  bcc CopyDataInit
++  
++/* Zero fill the bss segment. */
++  ldr r2, =_sbss
++  ldr r4, =_ebss
++  movs r3, #0
++  b LoopFillZerobss
++
++FillZerobss:
++  str  r3, [r2]
++  adds r2, r2, #4
++
++LoopFillZerobss:
++  cmp r2, r4
++  bcc FillZerobss
++
++/* Zero fill the sfastram_bss segment */
++  ldr r2, =__fastram_bss_start__
++  ldr r4, =__fastram_bss_end__
++  movs r3, #0
++  b LoopFillZerofastram_bss
++
++FillZerofastram_bss:
++  str r3, [r2]
++  adds r2, r2, #4
++
++LoopFillZerofastram_bss:
++  cmp r2, r4
++  bcc FillZerofastram_bss
++
++/* Call the clock system intitialization function.*/
++    bl  SystemInit
++/* Call static constructors */
++/*    bl __libc_init_array */
++/* Call the application's entry point.*/
++	bl	main
++
++LoopForever:
++    b LoopForever
++
++.size	Reset_Handler, .-Reset_Handler
++
++/**
++ * @brief  This is the code that gets called when the processor receives an
++ *         unexpected interrupt.  This simply enters an infinite loop, preserving
++ *         the system state for examination by a debugger.
++ *
++ * @param  None
++ * @retval : None
++*/
++    .section	.text.Default_Handler,"ax",%progbits
++Default_Handler:
++Infinite_Loop:
++	b	Infinite_Loop
++	.size	Default_Handler, .-Default_Handler
++/******************************************************************************
++*
++* The minimal vector table for a Cortex-M4.  Note that the proper constructs
++* must be placed on this to ensure that it ends up at physical address
++* 0x0000.0000.
++*
++******************************************************************************/
++ 	.section	.isr_vector,"a",%progbits
++	.type	g_pfnVectors, %object
++	.size	g_pfnVectors, .-g_pfnVectors
++
++
++g_pfnVectors:
++	.word	_estack
++	.word	Reset_Handler
++	.word	NMI_Handler
++	.word	HardFault_Handler
++	.word	MemManage_Handler
++	.word	BusFault_Handler
++	.word	UsageFault_Handler
++	.word	0
++	.word	0
++	.word	0
++	.word	0
++	.word	SVC_Handler
++	.word	DebugMon_Handler
++	.word	0
++	.word	PendSV_Handler
++	.word	SysTick_Handler
++	.word	WWDG_IRQHandler
++	.word	PVD_PVM_IRQHandler
++	.word	RTC_TAMP_LSECSS_IRQHandler
++	.word	RTC_WKUP_IRQHandler
++	.word	FLASH_IRQHandler
++	.word	RCC_IRQHandler
++	.word	EXTI0_IRQHandler
++	.word	EXTI1_IRQHandler
++	.word	EXTI2_IRQHandler
++	.word	EXTI3_IRQHandler
++	.word	EXTI4_IRQHandler
++	.word	DMA1_Channel1_IRQHandler
++	.word	DMA1_Channel2_IRQHandler
++	.word	DMA1_Channel3_IRQHandler
++	.word	DMA1_Channel4_IRQHandler
++	.word	DMA1_Channel5_IRQHandler
++	.word	DMA1_Channel6_IRQHandler
++	.word	DMA1_Channel7_IRQHandler
++	.word	ADC1_2_IRQHandler
++	.word	USB_HP_IRQHandler
++	.word	USB_LP_IRQHandler
++	.word	FDCAN1_IT0_IRQHandler
++	.word	FDCAN1_IT1_IRQHandler
++	.word	EXTI9_5_IRQHandler
++	.word	TIM1_BRK_TIM15_IRQHandler
++	.word	TIM1_UP_TIM16_IRQHandler
++	.word	TIM1_TRG_COM_TIM17_IRQHandler
++	.word	TIM1_CC_IRQHandler
++	.word	TIM2_IRQHandler
++	.word	TIM3_IRQHandler
++	.word	TIM4_IRQHandler
++	.word	I2C1_EV_IRQHandler
++	.word	I2C1_ER_IRQHandler
++	.word	I2C2_EV_IRQHandler
++	.word	I2C2_ER_IRQHandler
++	.word	SPI1_IRQHandler
++	.word	SPI2_IRQHandler
++	.word	USART1_IRQHandler
++	.word	USART2_IRQHandler
++	.word	USART3_IRQHandler
++	.word	EXTI15_10_IRQHandler
++	.word	RTC_Alarm_IRQHandler
++	.word	USBWakeUp_IRQHandler
++	.word	TIM8_BRK_IRQHandler
++	.word	TIM8_UP_IRQHandler
++	.word	TIM8_TRG_COM_IRQHandler
++	.word	TIM8_CC_IRQHandler
++	.word	ADC3_IRQHandler
++	.word	FMC_IRQHandler
++	.word	LPTIM1_IRQHandler
++	.word	TIM5_IRQHandler
++	.word	SPI3_IRQHandler
++	.word	UART4_IRQHandler
++	.word	UART5_IRQHandler
++	.word	TIM6_DAC_IRQHandler
++	.word	TIM7_DAC_IRQHandler
++	.word	DMA2_Channel1_IRQHandler
++	.word	DMA2_Channel2_IRQHandler
++	.word	DMA2_Channel3_IRQHandler
++	.word	DMA2_Channel4_IRQHandler
++	.word	DMA2_Channel5_IRQHandler
++	.word	ADC4_IRQHandler
++	.word	ADC5_IRQHandler
++	.word	UCPD1_IRQHandler
++	.word	COMP1_2_3_IRQHandler
++	.word	COMP4_5_6_IRQHandler
++	.word	COMP7_IRQHandler
++	.word	HRTIM1_Master_IRQHandler
++	.word	HRTIM1_TIMA_IRQHandler
++	.word	HRTIM1_TIMB_IRQHandler
++	.word	HRTIM1_TIMC_IRQHandler
++	.word	HRTIM1_TIMD_IRQHandler
++	.word	HRTIM1_TIME_IRQHandler
++	.word	HRTIM1_FLT_IRQHandler
++	.word	HRTIM1_TIMF_IRQHandler
++	.word	CRS_IRQHandler
++	.word	SAI1_IRQHandler
++	.word	TIM20_BRK_IRQHandler
++	.word	TIM20_UP_IRQHandler
++	.word	TIM20_TRG_COM_IRQHandler
++	.word	TIM20_CC_IRQHandler
++	.word	FPU_IRQHandler
++	.word	I2C4_EV_IRQHandler
++	.word	I2C4_ER_IRQHandler
++	.word	SPI4_IRQHandler
++	.word	0
++	.word	FDCAN2_IT0_IRQHandler
++	.word	FDCAN2_IT1_IRQHandler
++	.word	FDCAN3_IT0_IRQHandler
++	.word	FDCAN3_IT1_IRQHandler
++	.word	RNG_IRQHandler
++	.word	LPUART1_IRQHandler
++	.word	I2C3_EV_IRQHandler
++	.word	I2C3_ER_IRQHandler
++	.word	DMAMUX_OVR_IRQHandler
++	.word	QUADSPI_IRQHandler
++	.word	DMA1_Channel8_IRQHandler
++	.word	DMA2_Channel6_IRQHandler
++	.word	DMA2_Channel7_IRQHandler
++	.word	DMA2_Channel8_IRQHandler
++	.word	CORDIC_IRQHandler
++	.word	FMAC_IRQHandler
++
++/*******************************************************************************
++*
++* Provide weak aliases for each Exception handler to the Default_Handler.
++* As they are weak aliases, any function with the same name will override
++* this definition.
++*
++*******************************************************************************/
++
++	.weak	NMI_Handler
++	.thumb_set NMI_Handler,Default_Handler
++
++	.weak	HardFault_Handler
++	.thumb_set HardFault_Handler,Default_Handler
++
++	.weak	MemManage_Handler
++	.thumb_set MemManage_Handler,Default_Handler
++
++	.weak	BusFault_Handler
++	.thumb_set BusFault_Handler,Default_Handler
++
++	.weak	UsageFault_Handler
++	.thumb_set UsageFault_Handler,Default_Handler
++
++	.weak	SVC_Handler
++	.thumb_set SVC_Handler,Default_Handler
++
++	.weak	DebugMon_Handler
++	.thumb_set DebugMon_Handler,Default_Handler
++
++	.weak	PendSV_Handler
++	.thumb_set PendSV_Handler,Default_Handler
++
++	.weak	SysTick_Handler
++	.thumb_set SysTick_Handler,Default_Handler
++
++	.weak	WWDG_IRQHandler
++	.thumb_set WWDG_IRQHandler,Default_Handler
++
++	.weak	PVD_PVM_IRQHandler
++	.thumb_set PVD_PVM_IRQHandler,Default_Handler
++
++	.weak	RTC_TAMP_LSECSS_IRQHandler
++	.thumb_set RTC_TAMP_LSECSS_IRQHandler,Default_Handler
++
++	.weak	RTC_WKUP_IRQHandler
++	.thumb_set RTC_WKUP_IRQHandler,Default_Handler
++
++	.weak	FLASH_IRQHandler
++	.thumb_set FLASH_IRQHandler,Default_Handler
++
++	.weak	RCC_IRQHandler
++	.thumb_set RCC_IRQHandler,Default_Handler
++
++	.weak	EXTI0_IRQHandler
++	.thumb_set EXTI0_IRQHandler,Default_Handler
++
++	.weak	EXTI1_IRQHandler
++	.thumb_set EXTI1_IRQHandler,Default_Handler
++
++	.weak	EXTI2_IRQHandler
++	.thumb_set EXTI2_IRQHandler,Default_Handler
++
++	.weak	EXTI3_IRQHandler
++	.thumb_set EXTI3_IRQHandler,Default_Handler
++
++	.weak	EXTI4_IRQHandler
++	.thumb_set EXTI4_IRQHandler,Default_Handler
++
++	.weak	DMA1_Channel1_IRQHandler
++	.thumb_set DMA1_Channel1_IRQHandler,Default_Handler
++
++	.weak	DMA1_Channel2_IRQHandler
++	.thumb_set DMA1_Channel2_IRQHandler,Default_Handler
++
++	.weak	DMA1_Channel3_IRQHandler
++	.thumb_set DMA1_Channel3_IRQHandler,Default_Handler
++
++	.weak	DMA1_Channel4_IRQHandler
++	.thumb_set DMA1_Channel4_IRQHandler,Default_Handler
++
++	.weak	DMA1_Channel5_IRQHandler
++	.thumb_set DMA1_Channel5_IRQHandler,Default_Handler
++
++	.weak	DMA1_Channel6_IRQHandler
++	.thumb_set DMA1_Channel6_IRQHandler,Default_Handler
++
++	.weak	DMA1_Channel7_IRQHandler
++	.thumb_set DMA1_Channel7_IRQHandler,Default_Handler
++
++	.weak	ADC1_2_IRQHandler
++	.thumb_set ADC1_2_IRQHandler,Default_Handler
++
++	.weak	USB_HP_IRQHandler
++	.thumb_set USB_HP_IRQHandler,Default_Handler
++
++	.weak	USB_LP_IRQHandler
++	.thumb_set USB_LP_IRQHandler,Default_Handler
++
++	.weak	FDCAN1_IT0_IRQHandler
++	.thumb_set FDCAN1_IT0_IRQHandler,Default_Handler
++
++	.weak	FDCAN1_IT1_IRQHandler
++	.thumb_set FDCAN1_IT1_IRQHandler,Default_Handler
++
++	.weak	EXTI9_5_IRQHandler
++	.thumb_set EXTI9_5_IRQHandler,Default_Handler
++
++	.weak	TIM1_BRK_TIM15_IRQHandler
++	.thumb_set TIM1_BRK_TIM15_IRQHandler,Default_Handler
++
++	.weak	TIM1_UP_TIM16_IRQHandler
++	.thumb_set TIM1_UP_TIM16_IRQHandler,Default_Handler
++
++	.weak	TIM1_TRG_COM_TIM17_IRQHandler
++	.thumb_set TIM1_TRG_COM_TIM17_IRQHandler,Default_Handler
++
++	.weak	TIM1_CC_IRQHandler
++	.thumb_set TIM1_CC_IRQHandler,Default_Handler
++
++	.weak	TIM2_IRQHandler
++	.thumb_set TIM2_IRQHandler,Default_Handler
++
++	.weak	TIM3_IRQHandler
++	.thumb_set TIM3_IRQHandler,Default_Handler
++
++	.weak	TIM4_IRQHandler
++	.thumb_set TIM4_IRQHandler,Default_Handler
++
++	.weak	I2C1_EV_IRQHandler
++	.thumb_set I2C1_EV_IRQHandler,Default_Handler
++
++	.weak	I2C1_ER_IRQHandler
++	.thumb_set I2C1_ER_IRQHandler,Default_Handler
++
++	.weak	I2C2_EV_IRQHandler
++	.thumb_set I2C2_EV_IRQHandler,Default_Handler
++
++	.weak	I2C2_ER_IRQHandler
++	.thumb_set I2C2_ER_IRQHandler,Default_Handler
++
++	.weak	SPI1_IRQHandler
++	.thumb_set SPI1_IRQHandler,Default_Handler
++
++	.weak	SPI2_IRQHandler
++	.thumb_set SPI2_IRQHandler,Default_Handler
++
++	.weak	USART1_IRQHandler
++	.thumb_set USART1_IRQHandler,Default_Handler
++
++	.weak	USART2_IRQHandler
++	.thumb_set USART2_IRQHandler,Default_Handler
++
++	.weak	USART3_IRQHandler
++	.thumb_set USART3_IRQHandler,Default_Handler
++
++	.weak	EXTI15_10_IRQHandler
++	.thumb_set EXTI15_10_IRQHandler,Default_Handler
++
++	.weak	RTC_Alarm_IRQHandler
++	.thumb_set RTC_Alarm_IRQHandler,Default_Handler
++
++	.weak	USBWakeUp_IRQHandler
++	.thumb_set USBWakeUp_IRQHandler,Default_Handler
++
++	.weak	TIM8_BRK_IRQHandler
++	.thumb_set TIM8_BRK_IRQHandler,Default_Handler
++
++	.weak	TIM8_UP_IRQHandler
++	.thumb_set TIM8_UP_IRQHandler,Default_Handler
++
++	.weak	TIM8_TRG_COM_IRQHandler
++	.thumb_set TIM8_TRG_COM_IRQHandler,Default_Handler
++
++	.weak	TIM8_CC_IRQHandler
++	.thumb_set TIM8_CC_IRQHandler,Default_Handler
++
++	.weak	ADC3_IRQHandler
++	.thumb_set ADC3_IRQHandler,Default_Handler
++
++	.weak	FMC_IRQHandler
++	.thumb_set FMC_IRQHandler,Default_Handler
++
++	.weak	LPTIM1_IRQHandler
++	.thumb_set LPTIM1_IRQHandler,Default_Handler
++
++	.weak	TIM5_IRQHandler
++	.thumb_set TIM5_IRQHandler,Default_Handler
++
++	.weak	SPI3_IRQHandler
++	.thumb_set SPI3_IRQHandler,Default_Handler
++
++	.weak	UART4_IRQHandler
++	.thumb_set UART4_IRQHandler,Default_Handler
++
++	.weak	UART5_IRQHandler
++	.thumb_set UART5_IRQHandler,Default_Handler
++
++	.weak	TIM6_DAC_IRQHandler
++	.thumb_set TIM6_DAC_IRQHandler,Default_Handler
++
++	.weak	TIM7_DAC_IRQHandler
++	.thumb_set TIM7_DAC_IRQHandler,Default_Handler
++
++	.weak	DMA2_Channel1_IRQHandler
++	.thumb_set DMA2_Channel1_IRQHandler,Default_Handler
++
++	.weak	DMA2_Channel2_IRQHandler
++	.thumb_set DMA2_Channel2_IRQHandler,Default_Handler
++
++	.weak	DMA2_Channel3_IRQHandler
++	.thumb_set DMA2_Channel3_IRQHandler,Default_Handler
++
++	.weak	DMA2_Channel4_IRQHandler
++	.thumb_set DMA2_Channel4_IRQHandler,Default_Handler
++
++	.weak	DMA2_Channel5_IRQHandler
++	.thumb_set DMA2_Channel5_IRQHandler,Default_Handler
++
++	.weak	ADC4_IRQHandler
++	.thumb_set ADC4_IRQHandler,Default_Handler
++
++	.weak	ADC5_IRQHandler
++	.thumb_set ADC5_IRQHandler,Default_Handler
++
++	.weak	UCPD1_IRQHandler
++	.thumb_set UCPD1_IRQHandler,Default_Handler
++
++	.weak	COMP1_2_3_IRQHandler
++	.thumb_set COMP1_2_3_IRQHandler,Default_Handler
++
++	.weak	COMP4_5_6_IRQHandler
++	.thumb_set COMP4_5_6_IRQHandler,Default_Handler
++
++	.weak	COMP7_IRQHandler
++	.thumb_set COMP7_IRQHandler,Default_Handler
++
++	.weak	HRTIM1_Master_IRQHandler
++	.thumb_set HRTIM1_Master_IRQHandler,Default_Handler
++
++	.weak	HRTIM1_TIMA_IRQHandler
++	.thumb_set HRTIM1_TIMA_IRQHandler,Default_Handler
++
++	.weak	HRTIM1_TIMB_IRQHandler
++	.thumb_set HRTIM1_TIMB_IRQHandler,Default_Handler
++
++	.weak	HRTIM1_TIMC_IRQHandler
++	.thumb_set HRTIM1_TIMC_IRQHandler,Default_Handler
++
++	.weak	HRTIM1_TIMD_IRQHandler
++	.thumb_set HRTIM1_TIMD_IRQHandler,Default_Handler
++
++	.weak	HRTIM1_TIME_IRQHandler
++	.thumb_set HRTIM1_TIME_IRQHandler,Default_Handler
++
++	.weak	HRTIM1_FLT_IRQHandler
++	.thumb_set HRTIM1_FLT_IRQHandler,Default_Handler
++
++	.weak	HRTIM1_TIMF_IRQHandler
++	.thumb_set HRTIM1_TIMF_IRQHandler,Default_Handler
++
++	.weak	CRS_IRQHandler
++	.thumb_set CRS_IRQHandler,Default_Handler
++
++	.weak	SAI1_IRQHandler
++	.thumb_set SAI1_IRQHandler,Default_Handler
++
++	.weak	TIM20_BRK_IRQHandler
++	.thumb_set TIM20_BRK_IRQHandler,Default_Handler
++
++	.weak	TIM20_UP_IRQHandler
++	.thumb_set TIM20_UP_IRQHandler,Default_Handler
++
++	.weak	TIM20_TRG_COM_IRQHandler
++	.thumb_set TIM20_TRG_COM_IRQHandler,Default_Handler
++
++	.weak	TIM20_CC_IRQHandler
++	.thumb_set TIM20_CC_IRQHandler,Default_Handler
++
++	.weak	FPU_IRQHandler
++	.thumb_set FPU_IRQHandler,Default_Handler
++
++	.weak	I2C4_EV_IRQHandler
++	.thumb_set I2C4_EV_IRQHandler,Default_Handler
++
++	.weak	I2C4_ER_IRQHandler
++	.thumb_set I2C4_ER_IRQHandler,Default_Handler
++
++	.weak	SPI4_IRQHandler
++	.thumb_set SPI4_IRQHandler,Default_Handler
++
++	.weak	FDCAN2_IT0_IRQHandler
++	.thumb_set FDCAN2_IT0_IRQHandler,Default_Handler
++
++	.weak	FDCAN2_IT1_IRQHandler
++	.thumb_set FDCAN2_IT1_IRQHandler,Default_Handler
++
++	.weak	FDCAN3_IT0_IRQHandler
++	.thumb_set FDCAN3_IT0_IRQHandler,Default_Handler
++
++	.weak	FDCAN3_IT1_IRQHandler
++	.thumb_set FDCAN3_IT1_IRQHandler,Default_Handler
++
++	.weak	RNG_IRQHandler
++	.thumb_set RNG_IRQHandler,Default_Handler
++
++	.weak	LPUART1_IRQHandler
++	.thumb_set LPUART1_IRQHandler,Default_Handler
++
++	.weak	I2C3_EV_IRQHandler
++	.thumb_set I2C3_EV_IRQHandler,Default_Handler
++
++	.weak	I2C3_ER_IRQHandler
++	.thumb_set I2C3_ER_IRQHandler,Default_Handler
++
++	.weak	DMAMUX_OVR_IRQHandler
++	.thumb_set DMAMUX_OVR_IRQHandler,Default_Handler
++
++	.weak	QUADSPI_IRQHandler
++	.thumb_set QUADSPI_IRQHandler,Default_Handler
++
++	.weak	DMA1_Channel8_IRQHandler
++	.thumb_set DMA1_Channel8_IRQHandler,Default_Handler
++
++	.weak	DMA2_Channel6_IRQHandler
++	.thumb_set DMA2_Channel6_IRQHandler,Default_Handler
++
++	.weak	DMA2_Channel7_IRQHandler
++	.thumb_set DMA2_Channel7_IRQHandler,Default_Handler
++
++	.weak	DMA2_Channel8_IRQHandler
++	.thumb_set DMA2_Channel8_IRQHandler,Default_Handler
++
++	.weak	CORDIC_IRQHandler
++	.thumb_set CORDIC_IRQHandler,Default_Handler
++
++	.weak	FMAC_IRQHandler
++	.thumb_set FMAC_IRQHandler,Default_Handler
++
++/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
+diff --git a/src/main/startup/stm32g4xx_hal_conf.h b/src/main/startup/stm32g4xx_hal_conf.h
+new file mode 100644
+index 000000000..2a89d187e
+--- /dev/null
++++ b/src/main/startup/stm32g4xx_hal_conf.h
+@@ -0,0 +1,382 @@
++/**
++  ******************************************************************************
++  * @file    stm32g4xx_hal_conf.h
++  * @author  MCD Application Team
++  * @brief   HAL configuration template file.
++  *          This file should be copied to the application folder and renamed
++  *          to stm32g4xx_hal_conf.h.
++  ******************************************************************************
++  * @attention
++  *
++  * <h2><center>&copy; Copyright (c) 2018 STMicroelectronics.
++  * All rights reserved.</center></h2>
++  *
++  * This software component is licensed by ST under BSD 3-Clause license,
++  * the "License"; You may not use this file except in compliance with the
++  * License. You may obtain a copy of the License at:
++  *                        opensource.org/licenses/BSD-3-Clause
++  *
++  ******************************************************************************
++  */
++
++/* Define to prevent recursive inclusion -------------------------------------*/
++#ifndef STM32G4xx_HAL_CONF_H
++#define STM32G4xx_HAL_CONF_H
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/* Exported types ------------------------------------------------------------*/
++/* Exported constants --------------------------------------------------------*/
++
++/* ########################## Module Selection ############################## */
++/**
++  * @brief This is the list of modules to be used in the HAL driver
++  */
++#define HAL_MODULE_ENABLED
++#define HAL_ADC_MODULE_ENABLED
++//#define HAL_COMP_MODULE_ENABLED
++#define HAL_CORDIC_MODULE_ENABLED
++#define HAL_CORTEX_MODULE_ENABLED
++//#define HAL_CRC_MODULE_ENABLED
++//#define HAL_CRYP_MODULE_ENABLED
++//#define HAL_DAC_MODULE_ENABLED
++#define HAL_DMA_MODULE_ENABLED
++#define HAL_EXTI_MODULE_ENABLED
++#define HAL_FDCAN_MODULE_ENABLED
++#define HAL_FLASH_MODULE_ENABLED
++//#define HAL_FMAC_MODULE_ENABLED
++#define HAL_GPIO_MODULE_ENABLED
++//#define HAL_HRTIM_MODULE_ENABLED
++//#define HAL_IRDA_MODULE_ENABLED
++//#define HAL_IWDG_MODULE_ENABLED
++#define HAL_I2C_MODULE_ENABLED
++//#define HAL_I2S_MODULE_ENABLED
++#define HAL_LPTIM_MODULE_ENABLED
++//#define HAL_NAND_MODULE_ENABLED
++//#define HAL_NOR_MODULE_ENABLED
++//#define HAL_OPAMP_MODULE_ENABLED
++#define HAL_PCD_MODULE_ENABLED
++#define HAL_PWR_MODULE_ENABLED
++//#define HAL_QSPI_MODULE_ENABLED
++#define HAL_RCC_MODULE_ENABLED
++//#define HAL_RNG_MODULE_ENABLED
++#define HAL_RTC_MODULE_ENABLED
++//#define HAL_SAI_MODULE_ENABLED
++//#define HAL_SMARTCARD_MODULE_ENABLED
++//#define HAL_SMBUS_MODULE_ENABLED
++#define HAL_SPI_MODULE_ENABLED
++//#define HAL_SRAM_MODULE_ENABLED
++#define HAL_TIM_MODULE_ENABLED
++#define HAL_UART_MODULE_ENABLED
++#define HAL_USART_MODULE_ENABLED
++//#define HAL_WWDG_MODULE_ENABLED
++
++/* ########################## Register Callbacks selection ############################## */
++/**
++  * @brief This is the list of modules where register callback can be used
++  */
++
++#define USE_HAL_ADC_REGISTER_CALLBACKS        0U
++#define USE_HAL_COMP_REGISTER_CALLBACKS       0U
++#define USE_HAL_CORDIC_REGISTER_CALLBACKS     0U
++#define USE_HAL_CRYP_REGISTER_CALLBACKS       0U
++#define USE_HAL_DAC_REGISTER_CALLBACKS        0U
++#define USE_HAL_EXTI_REGISTER_CALLBACKS       0U
++#define USE_HAL_FDCAN_REGISTER_CALLBACKS      0U
++#define USE_HAL_FMAC_REGISTER_CALLBACKS       0U
++#define USE_HAL_HRTIM_REGISTER_CALLBACKS      0U
++#define USE_HAL_I2C_REGISTER_CALLBACKS        0U
++#define USE_HAL_I2S_REGISTER_CALLBACKS        0U
++#define USE_HAL_IRDA_REGISTER_CALLBACKS       0U
++#define USE_HAL_LPTIM_REGISTER_CALLBACKS      0U
++#define USE_HAL_NAND_REGISTER_CALLBACKS       0U
++#define USE_HAL_NOR_REGISTER_CALLBACKS        0U
++#define USE_HAL_OPAMP_REGISTER_CALLBACKS      0U
++#define USE_HAL_PCD_REGISTER_CALLBACKS        0U
++#define USE_HAL_QSPI_REGISTER_CALLBACKS       0U
++#define USE_HAL_RNG_REGISTER_CALLBACKS        0U
++#define USE_HAL_RTC_REGISTER_CALLBACKS        0U
++#define USE_HAL_SAI_REGISTER_CALLBACKS        0U
++#define USE_HAL_SMARTCARD_REGISTER_CALLBACKS  0U
++#define USE_HAL_SMBUS_REGISTER_CALLBACKS      0U
++#define USE_HAL_SPI_REGISTER_CALLBACKS        0U
++#define USE_HAL_SRAM_REGISTER_CALLBACKS       0U
++#define USE_HAL_TIM_REGISTER_CALLBACKS        0U
++#define USE_HAL_UART_REGISTER_CALLBACKS       0U
++#define USE_HAL_USART_REGISTER_CALLBACKS      0U
++#define USE_HAL_WWDG_REGISTER_CALLBACKS       0U
++
++/* ########################## Oscillator Values adaptation ####################*/
++/**
++  * @brief Adjust the value of External High Speed oscillator (HSE) used in your application.
++  *        This value is used by the RCC HAL module to compute the system frequency
++  *        (when HSE is used as system clock source, directly or through the PLL).
++  */
++#if !defined  (HSE_VALUE)
++#define HSE_VALUE    (8000000UL) /*!< Value of the External oscillator in Hz */
++#endif /* HSE_VALUE */
++
++#if !defined  (HSE_STARTUP_TIMEOUT)
++#define HSE_STARTUP_TIMEOUT    (100UL)   /*!< Time out for HSE start up, in ms */
++#endif /* HSE_STARTUP_TIMEOUT */
++
++/**
++  * @brief Internal High Speed oscillator (HSI) value.
++  *        This value is used by the RCC HAL module to compute the system frequency
++  *        (when HSI is used as system clock source, directly or through the PLL).
++  */
++#if !defined  (HSI_VALUE)
++#define HSI_VALUE    (16000000UL) /*!< Value of the Internal oscillator in Hz*/
++#endif /* HSI_VALUE */
++
++/**
++  * @brief Internal High Speed oscillator (HSI48) value for USB FS and RNG.
++  *        This internal oscillator is mainly dedicated to provide a high precision clock to
++  *        the USB peripheral by means of a special Clock Recovery System (CRS) circuitry.
++  *        When the CRS is not used, the HSI48 RC oscillator runs on it default frequency
++  *        which is subject to manufacturing process variations.
++  */
++#if !defined  (HSI48_VALUE)
++#define HSI48_VALUE   (48000000UL) /*!< Value of the Internal High Speed oscillator for USB FS/RNG in Hz.
++                                          The real value my vary depending on manufacturing process variations.*/
++#endif /* HSI48_VALUE */
++
++/**
++  * @brief Internal Low Speed oscillator (LSI) value.
++  */
++#if !defined  (LSI_VALUE)
++/*!< Value of the Internal Low Speed oscillator in Hz
++The real value may vary depending on the variations in voltage and temperature.*/
++#define LSI_VALUE  (32000UL)      /*!< LSI Typical Value in Hz*/
++#endif /* LSI_VALUE */
++/**
++  * @brief External Low Speed oscillator (LSE) value.
++  *        This value is used by the UART, RTC HAL module to compute the system frequency
++  */
++#if !defined  (LSE_VALUE)
++#define LSE_VALUE    (32768UL) /*!< Value of the External oscillator in Hz*/
++#endif /* LSE_VALUE */
++
++#if !defined  (LSE_STARTUP_TIMEOUT)
++#define LSE_STARTUP_TIMEOUT    (5000UL)  /*!< Time out for LSE start up, in ms */
++#endif /* LSE_STARTUP_TIMEOUT */
++
++/**
++  * @brief External clock source for I2S and SAI peripherals
++  *        This value is used by the I2S and SAI HAL modules to compute the I2S and SAI clock source
++  *        frequency, this source is inserted directly through I2S_CKIN pad.
++  */
++#if !defined  (EXTERNAL_CLOCK_VALUE)
++#define EXTERNAL_CLOCK_VALUE    (48000UL) /*!< Value of the External clock source in Hz*/
++#endif /* EXTERNAL_CLOCK_VALUE */
++
++/* Tip: To avoid modifying this file each time you need to use different HSE,
++   ===  you can define the HSE value in your toolchain compiler preprocessor. */
++
++/* ########################### System Configuration ######################### */
++/**
++  * @brief This is the HAL system configuration section
++  */
++#define  VDD_VALUE                    (3300UL) /*!< Value of VDD in mv */
++#define  TICK_INT_PRIORITY            (0x0FUL) /*!< tick interrupt priority */
++#define  USE_RTOS                     0U
++#define  PREFETCH_ENABLE              1U
++#define  INSTRUCTION_CACHE_ENABLE     1U
++#define  DATA_CACHE_ENABLE            1U
++
++/* ########################## Assert Selection ############################## */
++/**
++  * @brief Uncomment the line below to expanse the "assert_param" macro in the
++  *        HAL drivers code
++  */
++/* #define USE_FULL_ASSERT               1U */
++
++/* ################## SPI peripheral configuration ########################## */
++
++/* CRC FEATURE: Use to activate CRC feature inside HAL SPI Driver
++ * Activated: CRC code is present inside driver
++ * Deactivated: CRC code cleaned from driver
++ */
++
++#define USE_SPI_CRC                   1U
++
++/* Includes ------------------------------------------------------------------*/
++/**
++  * @brief Include module's header file
++  */
++
++#ifdef HAL_RCC_MODULE_ENABLED
++#include "stm32g4xx_hal_rcc.h"
++#endif /* HAL_RCC_MODULE_ENABLED */
++
++#ifdef HAL_GPIO_MODULE_ENABLED
++#include "stm32g4xx_hal_gpio.h"
++#endif /* HAL_GPIO_MODULE_ENABLED */
++
++#ifdef HAL_DMA_MODULE_ENABLED
++#include "stm32g4xx_hal_dma.h"
++#endif /* HAL_DMA_MODULE_ENABLED */
++
++#ifdef HAL_CORTEX_MODULE_ENABLED
++#include "stm32g4xx_hal_cortex.h"
++#endif /* HAL_CORTEX_MODULE_ENABLED */
++
++#ifdef HAL_ADC_MODULE_ENABLED
++#include "stm32g4xx_hal_adc.h"
++#endif /* HAL_ADC_MODULE_ENABLED */
++
++#ifdef HAL_COMP_MODULE_ENABLED
++#include "stm32g4xx_hal_comp.h"
++#endif /* HAL_COMP_MODULE_ENABLED */
++
++#ifdef HAL_CORDIC_MODULE_ENABLED
++#include "stm32g4xx_hal_cordic.h"
++#endif /* HAL_CORDIC_MODULE_ENABLED */
++
++#ifdef HAL_CRC_MODULE_ENABLED
++#include "stm32g4xx_hal_crc.h"
++#endif /* HAL_CRC_MODULE_ENABLED */
++
++#ifdef HAL_CRYP_MODULE_ENABLED
++#include "stm32g4xx_hal_cryp.h"
++#endif /* HAL_CRYP_MODULE_ENABLED */
++
++#ifdef HAL_DAC_MODULE_ENABLED
++#include "stm32g4xx_hal_dac.h"
++#endif /* HAL_DAC_MODULE_ENABLED */
++
++#ifdef HAL_EXTI_MODULE_ENABLED
++#include "stm32g4xx_hal_exti.h"
++#endif /* HAL_EXTI_MODULE_ENABLED */
++
++#ifdef HAL_FDCAN_MODULE_ENABLED
++#include "stm32g4xx_hal_fdcan.h"
++#endif /* HAL_FDCAN_MODULE_ENABLED */
++
++#ifdef HAL_FLASH_MODULE_ENABLED
++#include "stm32g4xx_hal_flash.h"
++#endif /* HAL_FLASH_MODULE_ENABLED */
++
++#ifdef HAL_FMAC_MODULE_ENABLED
++#include "stm32g4xx_hal_fmac.h"
++#endif /* HAL_FMAC_MODULE_ENABLED */
++
++#ifdef HAL_HRTIM_MODULE_ENABLED
++#include "stm32g4xx_hal_hrtim.h"
++#endif /* HAL_HRTIM_MODULE_ENABLED */
++
++#ifdef HAL_IRDA_MODULE_ENABLED
++#include "stm32g4xx_hal_irda.h"
++#endif /* HAL_IRDA_MODULE_ENABLED */
++
++#ifdef HAL_IWDG_MODULE_ENABLED
++#include "stm32g4xx_hal_iwdg.h"
++#endif /* HAL_IWDG_MODULE_ENABLED */
++
++#ifdef HAL_I2C_MODULE_ENABLED
++#include "stm32g4xx_hal_i2c.h"
++#endif /* HAL_I2C_MODULE_ENABLED */
++
++#ifdef HAL_I2S_MODULE_ENABLED
++#include "stm32g4xx_hal_i2s.h"
++#endif /* HAL_I2S_MODULE_ENABLED */
++
++#ifdef HAL_LPTIM_MODULE_ENABLED
++#include "stm32g4xx_hal_lptim.h"
++#endif /* HAL_LPTIM_MODULE_ENABLED */
++
++#ifdef HAL_NAND_MODULE_ENABLED
++#include "stm32g4xx_hal_nand.h"
++#endif /* HAL_NAND_MODULE_ENABLED */
++
++#ifdef HAL_NOR_MODULE_ENABLED
++#include "stm32g4xx_hal_nor.h"
++#endif /* HAL_NOR_MODULE_ENABLED */
++
++#ifdef HAL_OPAMP_MODULE_ENABLED
++#include "stm32g4xx_hal_opamp.h"
++#endif /* HAL_OPAMP_MODULE_ENABLED */
++
++#ifdef HAL_PCD_MODULE_ENABLED
++#include "stm32g4xx_hal_pcd.h"
++#endif /* HAL_PCD_MODULE_ENABLED */
++
++#ifdef HAL_PWR_MODULE_ENABLED
++#include "stm32g4xx_hal_pwr.h"
++#endif /* HAL_PWR_MODULE_ENABLED */
++
++#ifdef HAL_QSPI_MODULE_ENABLED
++#include "stm32g4xx_hal_qspi.h"
++#endif /* HAL_QSPI_MODULE_ENABLED */
++
++#ifdef HAL_RNG_MODULE_ENABLED
++#include "stm32g4xx_hal_rng.h"
++#endif /* HAL_RNG_MODULE_ENABLED */
++
++#ifdef HAL_RTC_MODULE_ENABLED
++#include "stm32g4xx_hal_rtc.h"
++#endif /* HAL_RTC_MODULE_ENABLED */
++
++#ifdef HAL_SAI_MODULE_ENABLED
++#include "stm32g4xx_hal_sai.h"
++#endif /* HAL_SAI_MODULE_ENABLED */
++
++#ifdef HAL_SMARTCARD_MODULE_ENABLED
++#include "stm32g4xx_hal_smartcard.h"
++#endif /* HAL_SMARTCARD_MODULE_ENABLED */
++
++#ifdef HAL_SMBUS_MODULE_ENABLED
++#include "stm32g4xx_hal_smbus.h"
++#endif /* HAL_SMBUS_MODULE_ENABLED */
++
++#ifdef HAL_SPI_MODULE_ENABLED
++#include "stm32g4xx_hal_spi.h"
++#endif /* HAL_SPI_MODULE_ENABLED */
++
++#ifdef HAL_SRAM_MODULE_ENABLED
++#include "stm32g4xx_hal_sram.h"
++#endif /* HAL_SRAM_MODULE_ENABLED */
++
++#ifdef HAL_TIM_MODULE_ENABLED
++#include "stm32g4xx_hal_tim.h"
++#endif /* HAL_TIM_MODULE_ENABLED */
++
++#ifdef HAL_UART_MODULE_ENABLED
++#include "stm32g4xx_hal_uart.h"
++#endif /* HAL_UART_MODULE_ENABLED */
++
++#ifdef HAL_USART_MODULE_ENABLED
++#include "stm32g4xx_hal_usart.h"
++#endif /* HAL_USART_MODULE_ENABLED */
++
++#ifdef HAL_WWDG_MODULE_ENABLED
++#include "stm32g4xx_hal_wwdg.h"
++#endif /* HAL_WWDG_MODULE_ENABLED */
++
++/* Exported macro ------------------------------------------------------------*/
++#ifdef  USE_FULL_ASSERT
++/**
++  * @brief  The assert_param macro is used for function's parameters check.
++  * @param  expr: If expr is false, it calls assert_failed function
++  *         which reports the name of the source file and the source
++  *         line number of the call that failed.
++  *         If expr is true, it returns no value.
++  * @retval None
++  */
++#define assert_param(expr) ((expr) ? (void)0U : assert_failed((uint8_t *)__FILE__, __LINE__))
++/* Exported functions ------------------------------------------------------- */
++void assert_failed(uint8_t *file, uint32_t line);
++#else
++#define assert_param(expr) ((void)0U)
++#endif /* USE_FULL_ASSERT */
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* STM32G4xx_HAL_CONF_H */
++
++
++/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
+diff --git a/src/main/target/BETAFPVG473/CMakeLists.txt b/src/main/target/BETAFPVG473/CMakeLists.txt
+new file mode 100644
+index 000000000..1960bd543
+--- /dev/null
++++ b/src/main/target/BETAFPVG473/CMakeLists.txt
+@@ -0,0 +1 @@
++target_stm32g474xg(BETAFPVG473 SKIP_RELEASES)
+\ No newline at end of file
+diff --git a/src/main/target/BETAFPVG473/config.c b/src/main/target/BETAFPVG473/config.c
+new file mode 100644
+index 000000000..a87b8c8b7
+--- /dev/null
++++ b/src/main/target/BETAFPVG473/config.c
+@@ -0,0 +1,14 @@
++/*
++ * INAV target defaults for BetaFPV G473.
++ */
++
++#include <stdint.h>
++
++#include "platform.h"
++
++#include "fc/fc_msp_box.h"
++#include "fc/config.h"
++
++void targetConfiguration(void)
++{
++}
+\ No newline at end of file
+diff --git a/src/main/target/BETAFPVG473/target.c b/src/main/target/BETAFPVG473/target.c
+new file mode 100644
+index 000000000..802820037
+--- /dev/null
++++ b/src/main/target/BETAFPVG473/target.c
+@@ -0,0 +1,24 @@
++/*
++ * INAV timer/output mapping for BetaFPV G473.
++ */
++
++#include <stdint.h>
++
++#include "platform.h"
++
++#include "drivers/bus.h"
++#include "drivers/io.h"
++#include "drivers/pwm_mapping.h"
++#include "drivers/timer.h"
++#include "drivers/sensor.h"
++
++timerHardware_t timerHardware[] = {
++    DEF_TIM(TIM3, CH3, PB0, TIM_USE_MOTOR, 0, 0),   // M1
++    DEF_TIM(TIM3, CH4, PB1, TIM_USE_MOTOR, 0, 1),   // M2
++    DEF_TIM(TIM8, CH1, PB6, TIM_USE_MOTOR, 0, 2),   // M3
++    DEF_TIM(TIM8, CH4N, PC13, TIM_USE_MOTOR, 0, 3), // M4
++
++    DEF_TIM(TIM5, CH1, PB2, TIM_USE_LED, 0, 4),     // WS2811 LED strip
++};
++
++const int timerHardwareCount = sizeof(timerHardware) / sizeof(timerHardware[0]);
+\ No newline at end of file
+diff --git a/src/main/target/BETAFPVG473/target.h b/src/main/target/BETAFPVG473/target.h
+new file mode 100644
+index 000000000..935aaaa11
+--- /dev/null
++++ b/src/main/target/BETAFPVG473/target.h
+@@ -0,0 +1,135 @@
++/*
++ * INAV target definition for BetaFPV G473.
++ *
++ * Hardware resources were cross-checked against the Betaflight 4.5.1
++ * BETAFPVG473 target and the supplied Betaflight CLI dump.
++ */
++
++#pragma once
++
++/* Keep the firmware within the 512 KiB flash budget. */
++#undef USE_DYNAMIC_FILTERS
++#undef USE_ADAPTIVE_FILTER
++#undef USE_FRSKYOSD
++#undef USE_DJI_HD_OSD
++
++#define TARGET_BOARD_IDENTIFIER "BFG4"
++#define USBD_PRODUCT_STRING     "INAV BETAFPVG473"
++
++#define LED0                    PC15
++#define LED1                    PC14
++
++#define USE_BEEPER
++#define BEEPER                  PA8
++#define BEEPER_INVERTED
++
++#define USE_SPI
++#define USE_SPI_DEVICE_1
++#define SPI1_SCK_PIN            PA5
++#define SPI1_MISO_PIN           PA6
++#define SPI1_MOSI_PIN           PA7
++#define SPI1_NSS_PIN            PA4
++
++#define USE_SPI_DEVICE_2
++#define SPI2_SCK_PIN            PB13
++#define SPI2_MISO_PIN           PB14
++#define SPI2_MOSI_PIN           PB15
++#define SPI2_NSS_PIN            PB12
++
++#define USE_SPI_DEVICE_3
++#define SPI3_SCK_PIN            PB3
++#define SPI3_MISO_PIN           PB4
++#define SPI3_MOSI_PIN           PB5
++
++#define USE_IMU_ICM42605
++#define IMU_ICM42605_ALIGN      CW90_DEG
++#define ICM42605_SPI_BUS        BUS_SPI1
++#define ICM42605_CS_PIN         PA4
++#define GYRO_1_EXTI_PIN         PC4
++#define USE_EXTI
++#define USE_GYRO_EXTI
++#define USE_MPU_DATA_READY_SIGNAL
++
++#define USE_IMU_BMI270
++#define IMU_BMI270_ALIGN        CW90_DEG
++#define BMI270_SPI_BUS          BUS_SPI1
++#define BMI270_CS_PIN           PA4
++
++#define USE_I2C
++#define USE_I2C_DEVICE_1
++#define I2C1_SCL                PA15
++#define I2C1_SDA                PB7
++
++#define USE_BARO
++#define BARO_I2C_BUS            BUS_I2C1
++#define USE_BARO_BMP280
++#define USE_BARO_DPS310
++
++#define USE_MAG
++#define MAG_I2C_BUS             BUS_I2C1
++
++/* #define USE_MAX7456 */
++/* #define MAX7456_SPI_BUS */ //         BUS_SPI2
++/* #define MAX7456_CS_PIN */ //          PB12
++
++#define USE_FLASHFS
++#define USE_FLASH_M25P16
++#define M25P16_SPI_BUS          BUS_SPI3
++#define M25P16_CS_PIN           PB9
++#define USE_FLASH_W25N01G
++#define W25N01G_SPI_BUS         BUS_SPI3
++#define W25N01G_CS_PIN          PB9
++#define ENABLE_BLACKBOX_LOGGING_ON_SPIFLASH_BY_DEFAULT
++
++#define USE_VCP
++
++#define USE_UART1
++#define UART1_TX_PIN            PA9
++#define UART1_RX_PIN            PA10
++
++#define USE_UART2
++#define UART2_TX_PIN            PA2
++#define UART2_RX_PIN            PA3
++
++#define USE_UART3
++#define UART3_TX_PIN            PB10
++#define UART3_RX_PIN            PB11
++
++#define USE_UART4
++#define UART4_TX_PIN            PC10
++#define UART4_RX_PIN            PC11
++
++#define SERIAL_PORT_COUNT       5
++
++#define DEFAULT_RX_TYPE         RX_TYPE_SERIAL
++#define SERIALRX_PROVIDER       SERIALRX_CRSF
++#define SERIALRX_UART           SERIAL_PORT_USART3
++
++#define USE_ADC
++#define ADC_INSTANCE            ADC1
++#define ADC_CHANNEL_1_PIN       PA0
++#define ADC_CHANNEL_2_PIN       PA1
++#define VBAT_ADC_CHANNEL        ADC_CHN_1
++#define CURRENT_METER_ADC_CHANNEL ADC_CHN_2
++
++#define USE_LED_STRIP
++#define WS2811_PIN              PB2
++
++#define DEFAULT_FEATURES        (FEATURE_TX_PROF_SEL | FEATURE_CURRENT_METER | FEATURE_VBAT | FEATURE_TELEMETRY | FEATURE_OSD | FEATURE_BLACKBOX | FEATURE_LED_STRIP)
++#define DEFAULT_VOLTAGE_METER_SOURCE VOLTAGE_METER_ADC
++#define DEFAULT_CURRENT_METER_SOURCE CURRENT_METER_ADC
++#define VBAT_SCALE_DEFAULT      110
++#define CURRENT_METER_SCALE_DEFAULT 750
++
++#define USE_DSHOT
++#define USE_ESC_SENSOR
++#define USE_SERIAL_4WAY_BLHELI_INTERFACE
++#define USE_ESCSERIAL
++#define USE_RPM_FILTER
++
++#define TARGET_IO_PORTA         0xffff
++#define TARGET_IO_PORTB         0xffff
++#define TARGET_IO_PORTC         0xffff
++#define TARGET_IO_PORTD         0xffff
++
++#define MAX_PWM_OUTPUT_PORTS    4
+\ No newline at end of file
+diff --git a/src/main/target/CMakeLists.txt b/src/main/target/CMakeLists.txt
+index 65f9a19c4..1a66cb404 100644
+--- a/src/main/target/CMakeLists.txt
++++ b/src/main/target/CMakeLists.txt
+@@ -1,7 +1,16 @@
+-file(GLOB entries *)
+-foreach(subdir ${entries})
+-    set(entry "${subdir}/CMakeLists.txt")
+-    if (EXISTS ${entry})
+-        add_subdirectory(${subdir})
++set(BUILD_TARGET "" CACHE STRING "Build only a single hardware target")
++
++if(BUILD_TARGET)
++    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${BUILD_TARGET}/CMakeLists.txt")
++        message(FATAL_ERROR "Unknown target ${BUILD_TARGET}")
+     endif()
+-endforeach()
++    add_subdirectory(${BUILD_TARGET})
++else()
++    file(GLOB entries *)
++    foreach(subdir ${entries})
++        set(entry "${subdir}/CMakeLists.txt")
++        if (EXISTS ${entry})
++            add_subdirectory(${subdir})
++        endif()
++    endforeach()
++endif()
+\ No newline at end of file
+diff --git a/src/main/target/link/stm32_flash_g474xg.ld b/src/main/target/link/stm32_flash_g474xg.ld
+new file mode 100644
+index 000000000..af3eeb50f
+--- /dev/null
++++ b/src/main/target/link/stm32_flash_g474xg.ld
+@@ -0,0 +1,30 @@
++/*
++ * Linker script for STM32G474/G473 (512 KiB flash, 128 KiB SRAM).
++ *
++ * 0x08000000-0x08003FFF  16K vector table and startup code
++ * 0x08004000-0x08007FFF  16K configuration area
++ * 0x08008000-0x0807FFFF 480K firmware
++ */
++
++_Min_Heap_Size = 0;
++_Min_Stack_Size = 0x1800;
++
++ENTRY(Reset_Handler)
++
++MEMORY
++{
++    ITCM_RAM (rwx)     : ORIGIN = 0x10000000, LENGTH = 32K
++
++    FLASH (rx)         : ORIGIN = 0x08000000, LENGTH = 16K
++    FLASH_CONFIG (r)   : ORIGIN = 0x08004000, LENGTH = 16K
++    FLASH1 (rx)        : ORIGIN = 0x08008000, LENGTH = 480K
++
++    RAM (rwx)          : ORIGIN = 0x20000000, LENGTH = 108K
++    CCM (rwx)          : ORIGIN = 0x10003000, LENGTH = 20K
++    MEMORY_B1 (rx)     : ORIGIN = 0x60000000, LENGTH = 0K
++}
++
++REGION_ALIAS("STACKRAM", CCM)
++REGION_ALIAS("FASTRAM", CCM)
++
++INCLUDE "stm32_flash_f7_split.ld"
+\ No newline at end of file
+diff --git a/src/main/target/system_stm32g4xx.c b/src/main/target/system_stm32g4xx.c
+new file mode 100644
+index 000000000..5206fa853
+--- /dev/null
++++ b/src/main/target/system_stm32g4xx.c
+@@ -0,0 +1,450 @@
++/**
++  ******************************************************************************
++  * @file    system_stm32g4xx.c
++  * @author  MCD Application Team
++  * @brief   CMSIS Cortex-M4 Device Peripheral Access Layer System Source File
++  *
++  ******************************************************************************
++  * @attention
++  *
++  * <h2><center>&copy; Copyright (c) 2017 STMicroelectronics.
++  * All rights reserved.</center></h2>
++  *
++  * This software component is licensed by ST under BSD 3-Clause license,
++  * the "License"; You may not use this file except in compliance with the
++  * License. You may obtain a copy of the License at:
++  *                        opensource.org/licenses/BSD-3-Clause
++  *
++  ******************************************************************************
++  */
++
++#include <string.h>
++
++#include "stm32g4xx.h"
++#include "drivers/system.h"
++#include "platform.h"
++#include "drivers/persistent.h"
++#include "common/utils.h"
++
++#if !defined  (HSE_VALUE)
++  #define HSE_VALUE     8000000U /*!< Value of the External oscillator in Hz */
++#endif /* HSE_VALUE */
++
++#if !defined  (HSI_VALUE)
++  #define HSI_VALUE    16000000U /*!< Value of the Internal oscillator in Hz*/
++#endif /* HSI_VALUE */
++
++  /* The SystemCoreClock variable is updated in three ways:
++      1) by calling CMSIS function SystemCoreClockUpdate()
++      2) by calling HAL API function HAL_RCC_GetHCLKFreq()
++      3) each time HAL_RCC_ClockConfig() is called to configure the system clock frequency
++         Note: If you use this function to configure the system clock; then there
++               is no need to call the 2 first functions listed above, since SystemCoreClock
++               variable is updated automatically.
++  */
++  uint32_t SystemCoreClock = HSI_VALUE;
++
++  const uint8_t AHBPrescTable[16] = {0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 1U, 2U, 3U, 4U, 6U, 7U, 8U, 9U};
++  const uint8_t APBPrescTable[8] =  {0U, 0U, 0U, 0U, 1U, 2U, 3U, 4U};
++
++void SystemClock_Config(void); // Forward
++
++void SystemInit(void)
++{
++
++
++  initialiseMemorySections();
++
++  /* FPU settings ------------------------------------------------------------*/
++  #if (__FPU_PRESENT == 1) && (__FPU_USED == 1)
++    SCB->CPACR |= ((3UL << (10*2))|(3UL << (11*2)));  /* set CP10 and CP11 Full Access */
++  #endif
++
++  /* Configure the Vector Table location add offset address ------------------*/
++
++    extern uint8_t isr_vector_table_base;
++    SCB->VTOR = (uint32_t)&isr_vector_table_base;
++
++#ifdef USE_HAL_DRIVER
++    HAL_Init();
++#endif
++
++    SystemClock_Config();
++    SystemCoreClockUpdate();
++}
++
++/**
++  * @brief  Update SystemCoreClock variable according to Clock Register Values.
++  *         The SystemCoreClock variable contains the core clock (HCLK), it can
++  *         be used by the user application to setup the SysTick timer or configure
++  *         other parameters.
++  *
++  * @note   Each time the core clock (HCLK) changes, this function must be called
++  *         to update SystemCoreClock variable value. Otherwise, any configuration
++  *         based on this variable will be incorrect.
++  *
++  * @note   - The system frequency computed by this function is not the real
++  *           frequency in the chip. It is calculated based on the predefined
++  *           constant and the selected clock source:
++  *
++  *           - If SYSCLK source is HSI, SystemCoreClock will contain the HSI_VALUE(**)
++  *
++  *           - If SYSCLK source is HSE, SystemCoreClock will contain the HSE_VALUE(***)
++  *
++  *           - If SYSCLK source is PLL, SystemCoreClock will contain the HSE_VALUE(***)
++  *             or HSI_VALUE(*) multiplied/divided by the PLL factors.
++  *
++  *         (**) HSI_VALUE is a constant defined in stm32g4xx_hal.h file (default value
++  *              16 MHz) but the real value may vary depending on the variations
++  *              in voltage and temperature.
++  *
++  *         (***) HSE_VALUE is a constant defined in stm32g4xx_hal.h file (default value
++  *              8 MHz), user has to ensure that HSE_VALUE is same as the real
++  *              frequency of the crystal used. Otherwise, this function may
++  *              have wrong result.
++  *
++  *         - The result of this function could be not correct when using fractional
++  *           value for HSE crystal.
++  *
++  * @param  None
++  * @retval None
++  */
++void SystemCoreClockUpdate(void)
++{
++  uint32_t hse_value = persistentObjectRead(PERSISTENT_OBJECT_HSE_VALUE);
++
++  uint32_t tmp, pllvco, pllr, pllsource, pllm;
++
++  /* Get SYSCLK source -------------------------------------------------------*/
++  switch (RCC->CFGR & RCC_CFGR_SWS)
++  {
++    case 0x04:  /* HSI used as system clock source */
++      SystemCoreClock = HSI_VALUE;
++      break;
++
++    case 0x08:  /* HSE used as system clock source */
++      SystemCoreClock = hse_value;
++      break;
++
++    case 0x0C:  /* PLL used as system clock  source */
++      /* PLL_VCO = (HSE_VALUE or HSI_VALUE / PLLM) * PLLN
++         SYSCLK = PLL_VCO / PLLR
++         */
++      pllsource = (RCC->PLLCFGR & RCC_PLLCFGR_PLLSRC);
++      pllm = ((RCC->PLLCFGR & RCC_PLLCFGR_PLLM) >> 4) + 1U ;
++      if (pllsource == 0x02UL) /* HSI used as PLL clock source */
++      {
++        pllvco = (HSI_VALUE / pllm);
++      }
++      else                   /* HSE used as PLL clock source */
++      {
++        pllvco = (hse_value / pllm);
++      }
++      pllvco = pllvco * ((RCC->PLLCFGR & RCC_PLLCFGR_PLLN) >> 8);
++      pllr = (((RCC->PLLCFGR & RCC_PLLCFGR_PLLR) >> 25) + 1U) * 2U;
++      SystemCoreClock = pllvco/pllr;
++      break;
++
++    default:
++      break;
++  }
++  /* Compute HCLK clock frequency --------------------------------------------*/
++  /* Get HCLK prescaler */
++  tmp = AHBPrescTable[((RCC->CFGR & RCC_CFGR_HPRE) >> 4)];
++  /* HCLK clock frequency */
++  SystemCoreClock >>= tmp;
++}
++
++// SystemSYSCLKSource
++//   0: HSI
++//   1: HSE
++//   (2: PLLP)
++//   3: PLLR
++
++int SystemSYSCLKSource(void)
++{
++    uint32_t rawSrc = RCC->CFGR & RCC_CFGR_SW;
++    int src = 0;
++
++    switch (rawSrc) {
++    case 0: // can't happen, fall through
++        FALLTHROUGH;
++    case 1:
++        src = 0; // HSI 
++        break;
++
++    case 2:
++        src = 1; // HSE
++        break;
++
++    case 3:
++        src = 3; // PLL-R
++    }
++
++    return src;
++}
++
++// SystemPLLSource
++//   0: HSI
++//   1: HSE
++
++int SystemPLLSource(void)
++{
++    return (RCC->PLLCFGR & RCC_PLLCFGR_PLLSRC) & 1; // LSB determines HSI(0) or HSE(1)
++}
++
++void Error_Handler(void)
++{
++    while (1) {
++    }
++}
++
++/*
++ * G4 is capable of fine granularity overclocking thanks to a separate 48MHz source,
++ * but we keep the overclocking capability to match that of F405 (clocks at 168, 192, 216, 240).
++ *
++ * However, due to restrictions on MCO source, designs that wishes to generate 27MHz on MCO
++ * must use a 27MHz HSE source. The 27MHz HSE source will produce slightly different series of clocks
++ * due to restriction on PLL multipler range.
++ *
++ * If mhz == 8, 16 or 24 then scale it down to 4 and start with PLLN=42 for base 168MHz,
++ * with PLLN increment of 6 (4 * 6 = 24MHz a part)
++ *
++ * If mhz == 27 then scale it down to 9 with PLL=19 for base 171MHz with PLLN increment of 3 (9 * 3 = 27MHz a part)
++ *
++ * We don't prepare a separate frequency selection for 27MHz series in CLI, so what is set with "cpu_overclock" 
++ * will result in slightly higher clock when examined with "status" command.
++ */
++
++// Target frequencies for cpu_overclock (Levels 0 through 3)
++
++uint16_t sysclkSeries8[] =  { 168, 192, 216, 240 };
++uint16_t sysclkSeries27[] = { 171, 198, 225, 252 };
++#define OVERCLOCK_LEVELS ARRAYLEN(sysclkSeries8)
++
++// Generic fine granularity PLL parameter calculation
++
++static bool systemComputePLLParameters(uint8_t src, uint16_t target, int *sysclk, int *pllm, int *plln, int *pllr)
++{
++    int vcoTarget = target * 2;
++    int vcoBase;
++    int vcoDiff;
++    int multDiff;
++    int vcoFreq;
++
++    *pllr = 2;
++
++    if (src == 8 || src == 16 || src == 24) {
++        *pllm = src / 8;
++        vcoBase = 168 * 2;
++        vcoDiff = vcoTarget - vcoBase;
++        multDiff = vcoDiff / 16 * 2;
++        *plln = 42 + multDiff;
++        vcoFreq = 8 * *plln;
++    } else if (src == 27) {
++        *pllm = 3;
++        vcoBase = 171 * 2;
++        vcoDiff = vcoTarget - vcoBase;
++        multDiff = vcoDiff / 18 * 2;
++        *plln = 38 + multDiff;
++        vcoFreq = 9 * *plln;
++    } else {
++        return false;
++    }
++
++    // VCO seems to top out at 590MHz or so. Give it some margin.
++
++    if (vcoFreq >= 560) {
++        return false;
++    }
++    *sysclk = vcoFreq / 2;
++
++    return true;
++}
++
++static int pll_m;
++static int pll_n;
++static int pll_r;
++static uint32_t pllSrc;
++static int sysclkMhz;
++
++static bool systemClock_PLLConfig(int overclockLevel)
++{
++    uint32_t hse_value = persistentObjectRead(PERSISTENT_OBJECT_HSE_VALUE);
++    int pllInput;
++    int targetMhz;
++
++    if (hse_value == 0) {
++        pllInput = 16; // HSI
++        pllSrc = RCC_PLLSOURCE_HSI;
++        targetMhz = 168;
++    } else {
++        pllInput = hse_value / 1000000;
++        pllSrc = RCC_PLLSOURCE_HSE;
++        if (pllInput == 8 || pllInput == 16 || pllInput == 24) {
++            targetMhz = sysclkSeries8[overclockLevel];
++        } else if (pllInput == 27) {
++            targetMhz = sysclkSeries8[overclockLevel];
++        } else {
++            return false;
++        }
++    }
++
++    return systemComputePLLParameters(pllInput, targetMhz, &sysclkMhz, &pll_m, &pll_n, &pll_r);
++}
++
++void systemClockSetHSEValue(uint32_t frequency)
++{
++    uint32_t freqMhz = frequency / 1000000;
++
++    // Only supported HSE crystal/resonator is 27MHz or integer multiples of 8MHz
++
++    if (freqMhz != 27 && (freqMhz / 8) * 8 != freqMhz) {
++        return;
++    } 
++
++    uint32_t hse_value = persistentObjectRead(PERSISTENT_OBJECT_HSE_VALUE);
++
++    if (hse_value != frequency) {
++        persistentObjectWrite(PERSISTENT_OBJECT_HSE_VALUE, frequency);
++
++        if (hse_value != 0) {
++            __disable_irq();
++            NVIC_SystemReset();
++        }
++    }
++}
++
++void OverclockRebootIfNecessary(unsigned requestedOverclockLevel)
++{
++    uint32_t currentOverclockLevel = persistentObjectRead(PERSISTENT_OBJECT_OVERCLOCK_LEVEL);
++
++    if (requestedOverclockLevel >= OVERCLOCK_LEVELS ) {
++        requestedOverclockLevel = 0;
++    }
++
++    // If we are not running at the requested speed or
++    // we are running on PLL-HSI even HSE has been set,
++    // then remember the requested clock and issue soft reset
++
++    uint32_t hse_value = persistentObjectRead(PERSISTENT_OBJECT_HSE_VALUE);
++
++    if ((currentOverclockLevel != requestedOverclockLevel) ||
++            (hse_value &&
++             SystemSYSCLKSource() == 3 /* PLL-R */ &&
++             SystemPLLSource() != 1 /* HSE */)) {
++
++        // Make sure we can configure the requested clock.
++        if (!systemClock_PLLConfig(requestedOverclockLevel)) {
++            return;
++        }
++        persistentObjectWrite(PERSISTENT_OBJECT_OVERCLOCK_LEVEL, requestedOverclockLevel);
++        __disable_irq();
++        NVIC_SystemReset();
++    }
++}
++
++/**
++  * @brief System Clock Configuration
++  * @retval None
++  */
++// Extracted from MX generated main.c 
++
++void SystemClock_Config(void)
++{
++  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
++  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
++  RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
++  RCC_CRSInitTypeDef pInit = {0};
++
++  systemClock_PLLConfig(persistentObjectRead(PERSISTENT_OBJECT_OVERCLOCK_LEVEL));
++
++  // Configure the main internal regulator output voltage 
++
++  HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1_BOOST);
++
++  // Initializes the CPU, AHB and APB busses clocks 
++
++  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI|RCC_OSCILLATORTYPE_HSI48
++                              |RCC_OSCILLATORTYPE_LSI|RCC_OSCILLATORTYPE_HSE;
++
++  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
++  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
++  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
++  RCC_OscInitStruct.LSIState = RCC_LSI_ON;
++  RCC_OscInitStruct.HSI48State = RCC_HSI48_ON;
++
++  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
++  RCC_OscInitStruct.PLL.PLLSource = pllSrc;
++  RCC_OscInitStruct.PLL.PLLM = pll_m;
++  RCC_OscInitStruct.PLL.PLLN = pll_n;
++  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
++  RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV2;
++  RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV2;
++
++  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
++  {
++    Error_Handler();
++  }
++
++  // Initializes the CPU, AHB and APB busses clocks 
++
++  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
++                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
++  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
++  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
++  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
++  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
++
++  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_8) != HAL_OK)
++  {
++    Error_Handler();
++  }
++
++  // Initializes the peripherals clocks 
++
++  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART1|RCC_PERIPHCLK_USART2
++                              |RCC_PERIPHCLK_USART3|RCC_PERIPHCLK_UART4
++                              |RCC_PERIPHCLK_UART5|RCC_PERIPHCLK_I2C1
++                              |RCC_PERIPHCLK_I2C2|RCC_PERIPHCLK_I2C3
++                              |RCC_PERIPHCLK_I2C4|RCC_PERIPHCLK_USB
++                              |RCC_PERIPHCLK_ADC12
++                              |RCC_PERIPHCLK_ADC345
++                              |RCC_PERIPHCLK_FDCAN
++                              |RCC_PERIPHCLK_LPUART1
++                              ;
++  PeriphClkInit.Usart1ClockSelection = RCC_USART1CLKSOURCE_PCLK2;
++  PeriphClkInit.Usart2ClockSelection = RCC_USART2CLKSOURCE_PCLK1;
++  PeriphClkInit.Usart3ClockSelection = RCC_USART3CLKSOURCE_PCLK1;
++  PeriphClkInit.Uart4ClockSelection = RCC_UART4CLKSOURCE_PCLK1;
++  PeriphClkInit.Uart5ClockSelection = RCC_UART5CLKSOURCE_PCLK1;
++  PeriphClkInit.Lpuart1ClockSelection = RCC_LPUART1CLKSOURCE_PCLK1;
++  PeriphClkInit.I2c1ClockSelection = RCC_I2C1CLKSOURCE_PCLK1;
++  PeriphClkInit.I2c2ClockSelection = RCC_I2C2CLKSOURCE_PCLK1;
++  PeriphClkInit.I2c3ClockSelection = RCC_I2C3CLKSOURCE_PCLK1;
++  PeriphClkInit.I2c4ClockSelection = RCC_I2C4CLKSOURCE_PCLK1;
++  PeriphClkInit.Adc12ClockSelection = RCC_ADC12CLKSOURCE_SYSCLK;
++  PeriphClkInit.Adc345ClockSelection = RCC_ADC345CLKSOURCE_SYSCLK;
++  PeriphClkInit.FdcanClockSelection = RCC_FDCANCLKSOURCE_PCLK1;
++  PeriphClkInit.UsbClockSelection = RCC_USBCLKSOURCE_HSI48;
++  PeriphClkInit.RTCClockSelection = RCC_RTCCLKSOURCE_LSI;
++
++  if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
++  {
++    Error_Handler();
++  }
++
++  // Configures CRS 
++
++  pInit.Prescaler = RCC_CRS_SYNC_DIV1;
++  pInit.Source = RCC_CRS_SYNC_SOURCE_USB;
++  pInit.Polarity = RCC_CRS_SYNC_POLARITY_RISING;
++  pInit.ReloadValue = __HAL_RCC_CRS_RELOADVALUE_CALCULATE(48000000,1000);
++  pInit.ErrorLimitValue = 34;
++  pInit.HSI48CalibrationValue = 32;
++
++  HAL_RCCEx_CRSConfig(&pInit);
++
++  /* Configure Flash prefetch, Instruction cache, Data cache and wait state */
++  FLASH->ACR = FLASH_ACR_DBG_SWEN | FLASH_ACR_PRFTEN | FLASH_ACR_ICEN | FLASH_ACR_DCEN | FLASH_ACR_LATENCY_4WS;
++}
+diff --git a/src/main/vcp_hal/usbd_cdc_interface.c b/src/main/vcp_hal/usbd_cdc_interface.c
+index 319cec281..2559c9018 100644
+--- a/src/main/vcp_hal/usbd_cdc_interface.c
++++ b/src/main/vcp_hal/usbd_cdc_interface.c
+@@ -121,8 +121,7 @@ USBD_CDC_ItfTypeDef USBD_CDC_fops =
+   CDC_Itf_Init,
+   CDC_Itf_DeInit,
+   CDC_Itf_Control,
+-  CDC_Itf_Receive,
+-  CDC_Itf_Transmit
++  CDC_Itf_Receive
+ };
+ 
+ 
+@@ -164,9 +163,6 @@ static int8_t CDC_Itf_Init(void)
+   AppRxPtrOut = 0;
+   packetReceiveStalled = false;
+   
+-  // Prepare to receive first packet
+-  USBD_CDC_ReceivePacket(&USBD_Device);
+-
+   return (USBD_OK);
+ }
+ 
+@@ -483,7 +479,7 @@ uint32_t CDC_Send_FreeBytes(void)
+ 
+ uint32_t CDC_Send_DATA(const uint8_t *ptrBuffer, uint32_t sendLength)
+ {
+-    USBD_CDC_HandleTypeDef *hcdc = (USBD_CDC_HandleTypeDef*)USBD_Device.pClassData;
++    USBD_CDC_HandleTypeDef *hcdc = (USBD_CDC_HandleTypeDef*)USBD_Device.pCDC_ClassData;
+ 
+     // The CDC class is not registered in MSC mode; guard against a NULL
+     // class data pointer.
+diff --git a/src/main/vcp_hal/usbd_cdc_interface.h b/src/main/vcp_hal/usbd_cdc_interface.h
+index bd521eb32..6d83b83cd 100644
+--- a/src/main/vcp_hal/usbd_cdc_interface.h
++++ b/src/main/vcp_hal/usbd_cdc_interface.h
+@@ -57,8 +57,13 @@
+ 
+ /* Definition for TIMx clock resources */
+ #define TIMusb                             TIM7
++#if defined(STM32G4)
++#define TIMx_IRQn                        TIM7_DAC_IRQn
++#define TIMx_IRQHandler                  TIM7_DAC_IRQHandler
++#else
+ #define TIMx_IRQn                        TIM7_IRQn
+ #define TIMx_IRQHandler                  TIM7_IRQHandler
++#endif
+ #define TIMx_CLK_ENABLE                  __HAL_RCC_TIM7_CLK_ENABLE
+ 
+ /* Periodically, the state of the buffer "UserTxBuffer" is checked.
+diff --git a/src/main/vcp_hal/usbd_conf.h b/src/main/vcp_hal/usbd_conf.h
+index d104c79bf..e046b43cf 100644
+--- a/src/main/vcp_hal/usbd_conf.h
++++ b/src/main/vcp_hal/usbd_conf.h
+@@ -57,6 +57,8 @@
+ #include "stm32f7xx_hal.h"
+ #elif defined(STM32H7)
+ #include "stm32h7xx_hal.h"
++#elif defined(STM32G4)
++#include "stm32g4xx_hal.h"
+ #else
+ #error Unknown MCU
+ #endif
+diff --git a/src/main/vcp_hal/usbd_conf_stm32g4xx.c b/src/main/vcp_hal/usbd_conf_stm32g4xx.c
+new file mode 100644
+index 000000000..3e139a813
+--- /dev/null
++++ b/src/main/vcp_hal/usbd_conf_stm32g4xx.c
+@@ -0,0 +1,781 @@
++/* USER CODE BEGIN Header */
++/**
++******************************************************************************
++  * @file           USB_Device/CDC_Standalone/USB_Device/Target/usbd_conf.c
++  * @author         MCD Application Team
++  * @brief          This file implements the board support package for the USB device library
++  ******************************************************************************
++  * @attention
++  *
++  * <h2><center>&copy; Copyright (c) 2019 STMicroelectronics.
++  * All rights reserved.</center></h2>
++  *
++  * This software component is licensed by ST under Ultimate Liberty license
++  * SLA0044, the "License"; You may not use this file except in compliance with
++  * the License. You may obtain a copy of the License at:
++  *                             www.st.com/SLA0044
++  *
++  ******************************************************************************
++  */
++/* USER CODE END Header */
++
++/* Includes ------------------------------------------------------------------*/
++#include "stm32g4xx.h"
++#include "stm32g4xx_hal.h"
++#include "usbd_def.h"
++#include "usbd_core.h"
++
++#include "usbd_cdc.h"
++
++/* USER CODE BEGIN Includes */
++
++#include "platform.h"
++
++/* USER CODE END Includes */
++
++/* Private typedef -----------------------------------------------------------*/
++/* Private define ------------------------------------------------------------*/
++/* Private macro -------------------------------------------------------------*/
++
++/* Private variables ---------------------------------------------------------*/
++/* USER CODE BEGIN PV */
++/* Private variables ---------------------------------------------------------*/
++
++/* USER CODE END PV */
++
++PCD_HandleTypeDef hpcd_USB_FS;
++void Error_Handler(void);
++
++/* USER CODE BEGIN 0 */
++
++/* USER CODE END 0 */
++
++/* Exported function prototypes ----------------------------------------------*/
++
++/* USER CODE BEGIN PFP */
++/* Private function prototypes -----------------------------------------------*/
++
++/* USER CODE END PFP */
++
++/* Private functions ---------------------------------------------------------*/
++static USBD_StatusTypeDef USBD_Get_USB_Status(HAL_StatusTypeDef hal_status);
++/* USER CODE BEGIN 1 */
++static void SystemClockConfig_Resume(void);
++extern void USBD_Clock_Config(void);
++/* USER CODE END 1 */
++extern void SystemClock_Config(void);
++
++void USB_LP_IRQHandler(void)
++{
++  HAL_PCD_IRQHandler(&hpcd_USB_FS);
++}
++
++/*******************************************************************************
++                       LL Driver Callbacks (PCD -> USB Device Library)
++*******************************************************************************/
++/* MSP Init */
++
++#if (USE_HAL_PCD_REGISTER_CALLBACK == 1U)
++static void HAL_PCD_MspInit(PCD_HandleTypeDef* pcdHandle)
++#else
++void HAL_PCD_MspInit(PCD_HandleTypeDef* pcdHandle)
++#endif /* USE_HAL_PCD_REGISTER_CALLBACK */
++{
++  GPIO_InitTypeDef GPIO_InitStruct = {0};
++  if(pcdHandle->Instance==USB)
++  {
++  /* USER CODE BEGIN USB_MspInit 0 */
++
++  /* USER CODE END USB_MspInit 0 */
++
++    __HAL_RCC_GPIOA_CLK_ENABLE();
++    /**USB GPIO Configuration
++    PA11     ------> USB_DM
++    PA12     ------> USB_DP
++    */
++    GPIO_InitStruct.Pin = GPIO_PIN_11|GPIO_PIN_12;
++    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
++    GPIO_InitStruct.Pull = GPIO_NOPULL;
++    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
++    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
++
++    /* Peripheral clock enable */
++    __HAL_RCC_USB_CLK_ENABLE();
++
++    /* Peripheral interrupt init */
++    HAL_NVIC_SetPriority(USB_LP_IRQn, 6, 0);
++    HAL_NVIC_EnableIRQ(USB_LP_IRQn);
++  /* USER CODE BEGIN USB_MspInit 1 */
++
++  /* USER CODE END USB_MspInit 1 */
++  }
++}
++
++#if (USE_HAL_PCD_REGISTER_CALLBACK == 1U)
++static void HAL_PCD_MspDeInit(PCD_HandleTypeDef* pcdHandle)
++#else
++void HAL_PCD_MspDeInit(PCD_HandleTypeDef* pcdHandle)
++#endif /* USE_HAL_PCD_REGISTER_CALLBACK */
++{
++  if(pcdHandle->Instance==USB)
++  {
++  /* USER CODE BEGIN USB_MspDeInit 0 */
++
++  /* USER CODE END USB_MspDeInit 0 */
++    /* Peripheral clock disable */
++    __HAL_RCC_USB_CLK_DISABLE();
++
++    /**USB GPIO Configuration
++    PA11     ------> USB_DM
++    PA12     ------> USB_DP
++    */
++    HAL_GPIO_DeInit(GPIOA, GPIO_PIN_11|GPIO_PIN_12);
++
++    /* Peripheral interrupt Deinit*/
++    HAL_NVIC_DisableIRQ(USB_LP_IRQn);
++
++  /* USER CODE BEGIN USB_MspDeInit 1 */
++    __HAL_RCC_GPIOA_CLK_DISABLE();
++  /* USER CODE END USB_MspDeInit 1 */
++  }
++}
++
++/**
++  * @brief  Setup stage callback
++  * @param  hpcd: PCD handle
++  * @retval None
++  */
++#if (USE_HAL_PCD_REGISTER_CALLBACKS == 1U)
++static void PCD_SetupStageCallback(PCD_HandleTypeDef *hpcd)
++#else
++void HAL_PCD_SetupStageCallback(PCD_HandleTypeDef *hpcd)
++#endif /* USE_HAL_PCD_REGISTER_CALLBACKS */
++{
++  /* USER CODE BEGIN HAL_PCD_SetupStageCallback_PreTreatment */
++
++  /* USER CODE END  HAL_PCD_SetupStageCallback_PreTreatment */
++  USBD_LL_SetupStage((USBD_HandleTypeDef*)hpcd->pData, (uint8_t *)hpcd->Setup);
++  /* USER CODE BEGIN HAL_PCD_SetupStageCallback_PostTreatment */
++
++  /* USER CODE END  HAL_PCD_SetupStageCallback_PostTreatment */
++}
++
++/**
++  * @brief  Data Out stage callback.
++  * @param  hpcd: PCD handle
++  * @param  epnum: Endpoint number
++  * @retval None
++  */
++#if (USE_HAL_PCD_REGISTER_CALLBACKS == 1U)
++static void PCD_DataOutStageCallback(PCD_HandleTypeDef *hpcd, uint8_t epnum)
++#else
++void HAL_PCD_DataOutStageCallback(PCD_HandleTypeDef *hpcd, uint8_t epnum)
++#endif /* USE_HAL_PCD_REGISTER_CALLBACKS */
++{
++  /* USER CODE BEGIN HAL_PCD_DataOutStageCallback_PreTreatment */
++
++  /* USER CODE END HAL_PCD_DataOutStageCallback_PreTreatment */
++  USBD_LL_DataOutStage((USBD_HandleTypeDef*)hpcd->pData, epnum, hpcd->OUT_ep[epnum].xfer_buff);
++  /* USER CODE BEGIN HAL_PCD_DataOutStageCallback_PostTreatment */
++
++  /* USER CODE END HAL_PCD_DataOutStageCallback_PostTreatment */
++}
++
++/**
++  * @brief  Data In stage callback.
++  * @param  hpcd: PCD handle
++  * @param  epnum: Endpoint number
++  * @retval None
++  */
++#if (USE_HAL_PCD_REGISTER_CALLBACKS == 1U)
++static void PCD_DataInStageCallback(PCD_HandleTypeDef *hpcd, uint8_t epnum)
++#else
++void HAL_PCD_DataInStageCallback(PCD_HandleTypeDef *hpcd, uint8_t epnum)
++#endif /* USE_HAL_PCD_REGISTER_CALLBACKS */
++{
++  /* USER CODE BEGIN HAL_PCD_DataInStageCallback_PreTreatment */
++
++  /* USER CODE END HAL_PCD_DataInStageCallback_PreTreatment */
++  USBD_LL_DataInStage((USBD_HandleTypeDef*)hpcd->pData, epnum, hpcd->IN_ep[epnum].xfer_buff);
++  /* USER CODE BEGIN HAL_PCD_DataInStageCallback_PostTreatment  */
++
++  /* USER CODE END HAL_PCD_DataInStageCallback_PostTreatment */
++}
++
++/**
++  * @brief  SOF callback.
++  * @param  hpcd: PCD handle
++  * @retval None
++  */
++#if (USE_HAL_PCD_REGISTER_CALLBACKS == 1U)
++static void PCD_SOFCallback(PCD_HandleTypeDef *hpcd)
++#else
++void HAL_PCD_SOFCallback(PCD_HandleTypeDef *hpcd)
++#endif /* USE_HAL_PCD_REGISTER_CALLBACKS */
++{
++  /* USER CODE BEGIN HAL_PCD_SOFCallback_PreTreatment */
++
++  /* USER CODE END HAL_PCD_SOFCallback_PreTreatment */
++  USBD_LL_SOF((USBD_HandleTypeDef*)hpcd->pData);
++  /* USER CODE BEGIN HAL_PCD_SOFCallback_PostTreatment */
++
++  /* USER CODE END HAL_PCD_SOFCallback_PostTreatment */
++}
++
++/**
++  * @brief  Reset callback.
++  * @param  hpcd: PCD handle
++  * @retval None
++  */
++#if (USE_HAL_PCD_REGISTER_CALLBACKS == 1U)
++static void PCD_ResetCallback(PCD_HandleTypeDef *hpcd)
++#else
++void HAL_PCD_ResetCallback(PCD_HandleTypeDef *hpcd)
++#endif /* USE_HAL_PCD_REGISTER_CALLBACKS */
++{
++  /* USER CODE BEGIN HAL_PCD_ResetCallback_PreTreatment */
++
++  /* USER CODE END HAL_PCD_ResetCallback_PreTreatment */
++  USBD_SpeedTypeDef speed = USBD_SPEED_FULL;
++
++  if ( hpcd->Init.speed != PCD_SPEED_FULL)
++  {
++    Error_Handler();
++  }
++    /* Set Speed. */
++  USBD_LL_SetSpeed((USBD_HandleTypeDef*)hpcd->pData, speed);
++
++  /* Reset Device. */
++  USBD_LL_Reset((USBD_HandleTypeDef*)hpcd->pData);
++  /* USER CODE BEGIN HAL_PCD_ResetCallback_PostTreatment */
++
++  /* USER CODE END HAL_PCD_ResetCallback_PostTreatment */
++}
++
++/**
++  * @brief  Suspend callback.
++  * When Low power mode is enabled the debug cannot be used (IAR, Keil doesn't support it)
++  * @param  hpcd: PCD handle
++  * @retval None
++  */
++#if (USE_HAL_PCD_REGISTER_CALLBACKS == 1U)
++static void PCD_SuspendCallback(PCD_HandleTypeDef *hpcd)
++#else
++void HAL_PCD_SuspendCallback(PCD_HandleTypeDef *hpcd)
++#endif /* USE_HAL_PCD_REGISTER_CALLBACKS */
++{
++  /* USER CODE BEGIN HAL_PCD_SuspendCallback_PreTreatment */
++
++  /* USER CODE END HAL_PCD_SuspendCallback_PreTreatment */
++  /* Inform USB library that core enters in suspend Mode. */
++  USBD_LL_Suspend((USBD_HandleTypeDef*)hpcd->pData);
++  /* Enter in STOP mode. */
++  /* USER CODE BEGIN 2 */
++  if (hpcd->Init.low_power_enable)
++  {
++    /* Set SLEEPDEEP bit and SleepOnExit of Cortex System Control Register. */
++    SCB->SCR |= (uint32_t)((uint32_t)(SCB_SCR_SLEEPDEEP_Msk | SCB_SCR_SLEEPONEXIT_Msk));
++  }
++  /* USER CODE END 2 */
++  /* USER CODE BEGIN HAL_PCD_SuspendCallback_PostTreatment */
++
++  /* USER CODE END HAL_PCD_SuspendCallback_PostTreatment */
++}
++
++/**
++  * @brief  Resume callback.
++  * When Low power mode is enabled the debug cannot be used (IAR, Keil doesn't support it)
++  * @param  hpcd: PCD handle
++  * @retval None
++  */
++#if (USE_HAL_PCD_REGISTER_CALLBACKS == 1U)
++static void PCD_ResumeCallback(PCD_HandleTypeDef *hpcd)
++#else
++void HAL_PCD_ResumeCallback(PCD_HandleTypeDef *hpcd)
++#endif /* USE_HAL_PCD_REGISTER_CALLBACKS */
++{
++  /* USER CODE BEGIN HAL_PCD_ResumeCallback_PreTreatment */
++
++  /* USER CODE END HAL_PCD_ResumeCallback_PreTreatment */
++
++  /* USER CODE BEGIN 3 */
++  if (hpcd->Init.low_power_enable)
++  {
++    /* Reset SLEEPDEEP bit of Cortex System Control Register. */
++    SCB->SCR &= (uint32_t)~((uint32_t)(SCB_SCR_SLEEPDEEP_Msk | SCB_SCR_SLEEPONEXIT_Msk));
++    SystemClockConfig_Resume();
++  }
++  /* USER CODE END 3 */
++
++  USBD_LL_Resume((USBD_HandleTypeDef*)hpcd->pData);
++  /* USER CODE BEGIN HAL_PCD_ResumeCallback_PostTreatment */
++
++  /* USER CODE END HAL_PCD_ResumeCallback_PostTreatment */
++}
++
++/**
++  * @brief  ISOOUTIncomplete callback.
++  * @param  hpcd: PCD handle
++  * @param  epnum: Endpoint number
++  * @retval None
++  */
++#if (USE_HAL_PCD_REGISTER_CALLBACKS == 1U)
++static void PCD_ISOOUTIncompleteCallback(PCD_HandleTypeDef *hpcd, uint8_t epnum)
++#else
++void HAL_PCD_ISOOUTIncompleteCallback(PCD_HandleTypeDef *hpcd, uint8_t epnum)
++#endif /* USE_HAL_PCD_REGISTER_CALLBACKS */
++{
++  /* USER CODE BEGIN HAL_PCD_ISOOUTIncompleteCallback_PreTreatment */
++
++  /* USER CODE END HAL_PCD_ISOOUTIncompleteCallback_PreTreatment */
++  USBD_LL_IsoOUTIncomplete((USBD_HandleTypeDef*)hpcd->pData, epnum);
++  /* USER CODE BEGIN HAL_PCD_ISOOUTIncompleteCallback_PostTreatment */
++
++  /* USER CODE END HAL_PCD_ISOOUTIncompleteCallback_PostTreatment */
++}
++
++/**
++  * @brief  ISOINIncomplete callback.
++  * @param  hpcd: PCD handle
++  * @param  epnum: Endpoint number
++  * @retval None
++  */
++#if (USE_HAL_PCD_REGISTER_CALLBACKS == 1U)
++static void PCD_ISOINIncompleteCallback(PCD_HandleTypeDef *hpcd, uint8_t epnum)
++#else
++void HAL_PCD_ISOINIncompleteCallback(PCD_HandleTypeDef *hpcd, uint8_t epnum)
++#endif /* USE_HAL_PCD_REGISTER_CALLBACKS */
++{
++  /* USER CODE BEGIN HAL_PCD_ISOINIncompleteCallback_PreTreatment */
++
++  /* USER CODE END HAL_PCD_ISOINIncompleteCallback_PreTreatment */
++  USBD_LL_IsoINIncomplete((USBD_HandleTypeDef*)hpcd->pData, epnum);
++  /* USER CODE BEGIN HAL_PCD_ISOINIncompleteCallback_PostTreatment */
++
++  /* USER CODE END HAL_PCD_ISOINIncompleteCallback_PostTreatment */
++}
++
++/**
++  * @brief  Connect callback.
++  * @param  hpcd: PCD handle
++  * @retval None
++  */
++#if (USE_HAL_PCD_REGISTER_CALLBACKS == 1U)
++static void PCD_ConnectCallback(PCD_HandleTypeDef *hpcd)
++#else
++void HAL_PCD_ConnectCallback(PCD_HandleTypeDef *hpcd)
++#endif /* USE_HAL_PCD_REGISTER_CALLBACKS */
++{
++  /* USER CODE BEGIN HAL_PCD_ConnectCallback_PreTreatment */
++
++  /* USER CODE END HAL_PCD_ConnectCallback_PreTreatment */
++  USBD_LL_DevConnected((USBD_HandleTypeDef*)hpcd->pData);
++  /* USER CODE BEGIN HAL_PCD_ConnectCallback_PostTreatment */
++
++  /* USER CODE END HAL_PCD_ConnectCallback_PostTreatment */
++}
++
++/**
++  * @brief  Disconnect callback.
++  * @param  hpcd: PCD handle
++  * @retval None
++  */
++#if (USE_HAL_PCD_REGISTER_CALLBACKS == 1U)
++static void PCD_DisconnectCallback(PCD_HandleTypeDef *hpcd)
++#else
++void HAL_PCD_DisconnectCallback(PCD_HandleTypeDef *hpcd)
++#endif /* USE_HAL_PCD_REGISTER_CALLBACKS */
++{
++  /* USER CODE BEGIN HAL_PCD_DisconnectCallback_PreTreatment */
++
++  /* USER CODE END HAL_PCD_DisconnectCallback_PreTreatment */
++  USBD_LL_DevDisconnected((USBD_HandleTypeDef*)hpcd->pData);
++  /* USER CODE BEGIN HAL_PCD_DisconnectCallback_PostTreatment */
++
++  /* USER CODE END HAL_PCD_DisconnectCallback_PostTreatment */
++}
++
++  /* USER CODE BEGIN LowLevelInterface */
++
++  /* USER CODE END LowLevelInterface */
++
++/*******************************************************************************
++                       LL Driver Interface (USB Device Library --> PCD)
++*******************************************************************************/
++
++/**
++  * @brief  Initializes the low level portion of the device driver.
++  * @param  pdev: Device handle
++  * @retval USBD status
++  */
++USBD_StatusTypeDef USBD_LL_Init(USBD_HandleTypeDef *pdev)
++{
++  /* Init USB Ip. */
++  hpcd_USB_FS.pData = pdev;
++  /* Link the driver to the stack. */
++  pdev->pData = &hpcd_USB_FS;
++
++  hpcd_USB_FS.Instance = USB;
++  hpcd_USB_FS.Init.dev_endpoints = 8;
++  hpcd_USB_FS.Init.speed = PCD_SPEED_FULL;
++  hpcd_USB_FS.Init.phy_itface = PCD_PHY_EMBEDDED;
++  hpcd_USB_FS.Init.Sof_enable = DISABLE;
++  hpcd_USB_FS.Init.low_power_enable = DISABLE;
++  hpcd_USB_FS.Init.lpm_enable = DISABLE;
++  hpcd_USB_FS.Init.battery_charging_enable = DISABLE;
++
++  #if (USE_HAL_PCD_REGISTER_CALLBACKS == 1U)
++  /* register Msp Callbacks (before the Init) */
++  HAL_PCD_RegisterCallback(&hpcd_USB_FS, HAL_PCD_MSPINIT_CB_ID, PCD_MspInit);
++  HAL_PCD_RegisterCallback(&hpcd_USB_FS, HAL_PCD_MSPDEINIT_CB_ID, PCD_MspDeInit);
++  #endif /* USE_HAL_PCD_REGISTER_CALLBACKS */
++
++  if (HAL_PCD_Init(&hpcd_USB_FS) != HAL_OK)
++  {
++    Error_Handler( );
++  }
++
++#if (USE_HAL_PCD_REGISTER_CALLBACKS == 1U)
++  /* Register USB PCD CallBacks */
++  HAL_PCD_RegisterCallback(&hpcd_USB_FS, HAL_PCD_SOF_CB_ID, PCD_SOFCallback);
++  HAL_PCD_RegisterCallback(&hpcd_USB_FS, HAL_PCD_SETUPSTAGE_CB_ID, PCD_SetupStageCallback);
++  HAL_PCD_RegisterCallback(&hpcd_USB_FS, HAL_PCD_RESET_CB_ID, PCD_ResetCallback);
++  HAL_PCD_RegisterCallback(&hpcd_USB_FS, HAL_PCD_SUSPEND_CB_ID, PCD_SuspendCallback);
++  HAL_PCD_RegisterCallback(&hpcd_USB_FS, HAL_PCD_RESUME_CB_ID, PCD_ResumeCallback);
++  HAL_PCD_RegisterCallback(&hpcd_USB_FS, HAL_PCD_CONNECT_CB_ID, PCD_ConnectCallback);
++  HAL_PCD_RegisterCallback(&hpcd_USB_FS, HAL_PCD_DISCONNECT_CB_ID, PCD_DisconnectCallback);
++  /* USER CODE BEGIN RegisterCallBackFirstPart */
++
++  /* USER CODE END RegisterCallBackFirstPart */
++  HAL_PCD_RegisterDataOutStageCallback(&hpcd_USB_FS, PCD_DataOutStageCallback);
++  HAL_PCD_RegisterDataInStageCallback(&hpcd_USB_FS, PCD_DataInStageCallback);
++  HAL_PCD_RegisterIsoOutIncpltCallback(&hpcd_USB_FS, PCD_ISOOUTIncompleteCallback);
++  HAL_PCD_RegisterIsoInIncpltCallback(&hpcd_USB_FS, PCD_ISOINIncompleteCallback);
++  /* USER CODE BEGIN RegisterCallBackSecondPart */
++
++  /* USER CODE END RegisterCallBackSecondPart */
++#endif /* USE_HAL_PCD_REGISTER_CALLBACKS */
++  /* USER CODE BEGIN EndPoint_Configuration */
++  HAL_PCDEx_PMAConfig(&hpcd_USB_FS, 0x00 , PCD_SNG_BUF, 0x14);
++  HAL_PCDEx_PMAConfig(&hpcd_USB_FS, 0x80 , PCD_SNG_BUF, 0x54);
++  /* USER CODE END EndPoint_Configuration */
++  /* USER CODE BEGIN EndPoint_Configuration_CDC */
++  HAL_PCDEx_PMAConfig(&hpcd_USB_FS, CDC_IN_EP, PCD_SNG_BUF, 0x94);
++  HAL_PCDEx_PMAConfig(&hpcd_USB_FS, CDC_OUT_EP, PCD_SNG_BUF, 0xD4);
++  HAL_PCDEx_PMAConfig(&hpcd_USB_FS, CDC_CMD_EP, PCD_SNG_BUF, 0x114);
++  /* USER CODE END EndPoint_Configuration_CDC */
++  return USBD_OK;
++}
++
++/**
++  * @brief  De-Initializes the low level portion of the device driver.
++  * @param  pdev: Device handle
++  * @retval USBD status
++  */
++USBD_StatusTypeDef USBD_LL_DeInit(USBD_HandleTypeDef *pdev)
++{
++  HAL_StatusTypeDef hal_status = HAL_OK;
++  USBD_StatusTypeDef usb_status = USBD_OK;
++
++  hal_status = HAL_PCD_DeInit(pdev->pData);
++
++  usb_status =  USBD_Get_USB_Status(hal_status);
++
++  return usb_status;
++}
++
++/**
++  * @brief  Starts the low level portion of the device driver.
++  * @param  pdev: Device handle
++  * @retval USBD status
++  */
++USBD_StatusTypeDef USBD_LL_Start(USBD_HandleTypeDef *pdev)
++{
++  HAL_StatusTypeDef hal_status = HAL_OK;
++  USBD_StatusTypeDef usb_status = USBD_OK;
++
++  hal_status = HAL_PCD_Start(pdev->pData);
++
++  usb_status =  USBD_Get_USB_Status(hal_status);
++
++  return usb_status;
++}
++
++/**
++  * @brief  Stops the low level portion of the device driver.
++  * @param  pdev: Device handle
++  * @retval USBD status
++  */
++USBD_StatusTypeDef USBD_LL_Stop(USBD_HandleTypeDef *pdev)
++{
++  HAL_StatusTypeDef hal_status = HAL_OK;
++  USBD_StatusTypeDef usb_status = USBD_OK;
++
++  hal_status = HAL_PCD_Stop(pdev->pData);
++
++  usb_status =  USBD_Get_USB_Status(hal_status);
++
++  return usb_status;
++}
++
++/**
++  * @brief  Opens an endpoint of the low level driver.
++  * @param  pdev: Device handle
++  * @param  ep_addr: Endpoint number
++  * @param  ep_type: Endpoint type
++  * @param  ep_mps: Endpoint max packet size
++  * @retval USBD status
++  */
++USBD_StatusTypeDef USBD_LL_OpenEP(USBD_HandleTypeDef *pdev, uint8_t ep_addr, uint8_t ep_type, uint16_t ep_mps)
++{
++  HAL_StatusTypeDef hal_status = HAL_OK;
++  USBD_StatusTypeDef usb_status = USBD_OK;
++
++  hal_status = HAL_PCD_EP_Open(pdev->pData, ep_addr, ep_mps, ep_type);
++
++  usb_status =  USBD_Get_USB_Status(hal_status);
++
++  return usb_status;
++}
++
++/**
++  * @brief  Closes an endpoint of the low level driver.
++  * @param  pdev: Device handle
++  * @param  ep_addr: Endpoint number
++  * @retval USBD status
++  */
++USBD_StatusTypeDef USBD_LL_CloseEP(USBD_HandleTypeDef *pdev, uint8_t ep_addr)
++{
++  HAL_StatusTypeDef hal_status = HAL_OK;
++  USBD_StatusTypeDef usb_status = USBD_OK;
++
++  hal_status = HAL_PCD_EP_Close(pdev->pData, ep_addr);
++
++  usb_status =  USBD_Get_USB_Status(hal_status);
++
++  return usb_status;
++}
++
++/**
++  * @brief  Flushes an endpoint of the Low Level Driver.
++  * @param  pdev: Device handle
++  * @param  ep_addr: Endpoint number
++  * @retval USBD status
++  */
++USBD_StatusTypeDef USBD_LL_FlushEP(USBD_HandleTypeDef *pdev, uint8_t ep_addr)
++{
++  HAL_StatusTypeDef hal_status = HAL_OK;
++  USBD_StatusTypeDef usb_status = USBD_OK;
++
++  hal_status = HAL_PCD_EP_Flush(pdev->pData, ep_addr);
++
++  usb_status =  USBD_Get_USB_Status(hal_status);
++
++  return usb_status;
++}
++
++/**
++  * @brief  Sets a Stall condition on an endpoint of the Low Level Driver.
++  * @param  pdev: Device handle
++  * @param  ep_addr: Endpoint number
++  * @retval USBD status
++  */
++USBD_StatusTypeDef USBD_LL_StallEP(USBD_HandleTypeDef *pdev, uint8_t ep_addr)
++{
++  HAL_StatusTypeDef hal_status = HAL_OK;
++  USBD_StatusTypeDef usb_status = USBD_OK;
++
++  hal_status = HAL_PCD_EP_SetStall(pdev->pData, ep_addr);
++
++  usb_status =  USBD_Get_USB_Status(hal_status);
++
++  return usb_status;
++}
++
++/**
++  * @brief  Clears a Stall condition on an endpoint of the Low Level Driver.
++  * @param  pdev: Device handle
++  * @param  ep_addr: Endpoint number
++  * @retval USBD status
++  */
++USBD_StatusTypeDef USBD_LL_ClearStallEP(USBD_HandleTypeDef *pdev, uint8_t ep_addr)
++{
++  HAL_StatusTypeDef hal_status = HAL_OK;
++  USBD_StatusTypeDef usb_status = USBD_OK;
++
++  hal_status = HAL_PCD_EP_ClrStall(pdev->pData, ep_addr);
++
++  usb_status =  USBD_Get_USB_Status(hal_status);
++
++  return usb_status;
++}
++
++/**
++  * @brief  Returns Stall condition.
++  * @param  pdev: Device handle
++  * @param  ep_addr: Endpoint number
++  * @retval Stall (1: Yes, 0: No)
++  */
++uint8_t USBD_LL_IsStallEP(USBD_HandleTypeDef *pdev, uint8_t ep_addr)
++{
++  PCD_HandleTypeDef *hpcd = (PCD_HandleTypeDef*) pdev->pData;
++
++  if((ep_addr & 0x80) == 0x80)
++  {
++    return hpcd->IN_ep[ep_addr & 0x7F].is_stall;
++  }
++  else
++  {
++    return hpcd->OUT_ep[ep_addr & 0x7F].is_stall;
++  }
++}
++
++/**
++  * @brief  Assigns a USB address to the device.
++  * @param  pdev: Device handle
++  * @param  dev_addr: Device address
++  * @retval USBD status
++  */
++USBD_StatusTypeDef USBD_LL_SetUSBAddress(USBD_HandleTypeDef *pdev, uint8_t dev_addr)
++{
++  HAL_StatusTypeDef hal_status = HAL_OK;
++  USBD_StatusTypeDef usb_status = USBD_OK;
++
++  hal_status = HAL_PCD_SetAddress(pdev->pData, dev_addr);
++
++  usb_status =  USBD_Get_USB_Status(hal_status);
++
++  return usb_status;
++}
++
++/**
++  * @brief  Transmits data over an endpoint.
++  * @param  pdev: Device handle
++  * @param  ep_addr: Endpoint number
++  * @param  pbuf: Pointer to data to be sent
++  * @param  size: Data size
++  * @retval USBD status
++  */
++USBD_StatusTypeDef USBD_LL_Transmit(USBD_HandleTypeDef *pdev, uint8_t ep_addr, uint8_t *pbuf, uint16_t size)
++{
++  HAL_StatusTypeDef hal_status = HAL_OK;
++  USBD_StatusTypeDef usb_status = USBD_OK;
++
++  hal_status = HAL_PCD_EP_Transmit(pdev->pData, ep_addr, pbuf, size);
++
++  usb_status =  USBD_Get_USB_Status(hal_status);
++
++  return usb_status;
++}
++
++/**
++  * @brief  Prepares an endpoint for reception.
++  * @param  pdev: Device handle
++  * @param  ep_addr: Endpoint number
++  * @param  pbuf: Pointer to data to be received
++  * @param  size: Data size
++  * @retval USBD status
++  */
++USBD_StatusTypeDef USBD_LL_PrepareReceive(USBD_HandleTypeDef *pdev, uint8_t ep_addr, uint8_t *pbuf, uint16_t size)
++{
++  HAL_StatusTypeDef hal_status = HAL_OK;
++  USBD_StatusTypeDef usb_status = USBD_OK;
++
++  hal_status = HAL_PCD_EP_Receive(pdev->pData, ep_addr, pbuf, size);
++
++  usb_status =  USBD_Get_USB_Status(hal_status);
++
++  return usb_status;
++}
++
++/**
++  * @brief  Returns the last transfered packet size.
++  * @param  pdev: Device handle
++  * @param  ep_addr: Endpoint number
++  * @retval Recived Data Size
++  */
++uint32_t USBD_LL_GetRxDataSize(USBD_HandleTypeDef *pdev, uint8_t ep_addr)
++{
++  return HAL_PCD_EP_GetRxCount((PCD_HandleTypeDef*) pdev->pData, ep_addr);
++}
++
++/**
++  * @brief  Delays routine for the USB Device Library.
++  * @param  Delay: Delay in ms
++  * @retval None
++  */
++void USBD_LL_Delay(uint32_t Delay)
++{
++  HAL_Delay(Delay);
++}
++
++/**
++  * @brief  Static single allocation.
++  * @param  size: Size of allocated memory
++  * @retval None
++  */
++void *USBD_static_malloc(uint32_t size)
++{
++  UNUSED(size);
++
++  static uint32_t mem[(sizeof(USBD_CDC_HandleTypeDef)/4)+1];/* On 32-bit boundary */
++  return mem;
++}
++
++/**
++  * @brief  Dummy memory free
++  * @param  p: Pointer to allocated  memory address
++  * @retval None
++  */
++void USBD_static_free(void *p)
++{
++  UNUSED(p);
++}
++
++/* USER CODE BEGIN 5 */
++/**
++  * @brief  Configures system clock after wake-up from USB resume callBack:
++  *         enable HSI, PLL and select PLL as system clock source.
++  * @retval None
++  */
++void SystemClockConfig_Resume(void)
++{
++#if 0
++  // We don't need this as we don't sleep
++  // XXX Entire sleep & wakeup support may be removed?
++  SystemClock_Config();
++  USBD_Clock_Config();
++#endif
++}
++/* USER CODE END 5 */
++
++/**
++  * @brief  Retuns the USB status depending on the HAL status:
++  * @param  hal_status: HAL status
++  * @retval USB status
++  */
++USBD_StatusTypeDef USBD_Get_USB_Status(HAL_StatusTypeDef hal_status)
++{
++  USBD_StatusTypeDef usb_status = USBD_OK;
++
++  switch (hal_status)
++  {
++    case HAL_OK :
++      usb_status = USBD_OK;
++    break;
++    case HAL_ERROR :
++      usb_status = USBD_FAIL;
++    break;
++    case HAL_BUSY :
++      usb_status = USBD_BUSY;
++    break;
++    case HAL_TIMEOUT :
++      usb_status = USBD_FAIL;
++    break;
++    default :
++      usb_status = USBD_FAIL;
++    break;
++  }
++  return usb_status;
++}
++/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
+diff --git a/src/utils/compiler.rb b/src/utils/compiler.rb
+index fe2868acd..b351c602c 100644
+--- a/src/utils/compiler.rb
++++ b/src/utils/compiler.rb
+@@ -36,7 +36,7 @@ class Compiler
+         # on Windows if PATH contains spaces.
+         #dirs = ((ENV["CPP_PATH"] || "") + File::PATH_SEPARATOR + (ENV["PATH"] || "")).split(File::PATH_SEPARATOR)
+         dirs = ((ENV["CPP_PATH"] || "") + File::PATH_SEPARATOR + (ENV["PATH"] || "")).split(File::PATH_SEPARATOR)
+-        bin = ENV["SETTINGS_CXX"]
++        bin = ENV["SETTINGS_CXX"] || ""
+         if bin.empty?
+             if use_host_gcc
+                 bin = "g++"
+@@ -97,7 +97,7 @@ class Compiler
+             all_args << "-o" << output
+         end
+         all_args << input
+-        stdout, stderr, compile_status = Open3.capture3(join_args(all_args))
++        stdout, stderr, compile_status = Open3.capture3(*all_args)
+ 	raise "Compiler error:\n#{all_args.join(' ')}\n#{stderr}" if not options[:noerror] and not compile_status.success?
+         return stdout, stderr
+     end

@@ -1,0 +1,56 @@
+# 
+# diff all
+
+# version
+# Betaflight / STM32G47X (SG47) 4.5.1 Dec 11 2025 / 08:14:05 (77d01ba3b) MSP API: 1.46
+# config rev: 111d518
+
+# start the command batch
+batch start
+
+# reset configuration to default settings
+defaults nosave
+
+board_name BETAFPVG473
+manufacturer_id BEFH
+mcu_id 002b00253235511235363938
+signature 
+
+# feature
+feature TELEMETRY
+feature LED_STRIP
+feature OSD
+
+# serial
+serial 3 131073 115200 57600 0 115200
+
+# master
+set motor_pwm_protocol = DSHOT300
+set gyro_1_sensor_align = CW90
+set gyro_1_align_yaw = 900
+
+profile 0
+
+profile 1
+
+profile 2
+
+profile 3
+
+# restore original profile selection
+profile 0
+
+rateprofile 0
+
+rateprofile 1
+
+rateprofile 2
+
+rateprofile 3
+
+# restore original rateprofile selection
+rateprofile 0
+
+# save configuration
+save
+# 
