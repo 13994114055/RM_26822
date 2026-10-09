@@ -75,9 +75,11 @@ new_mcu/
 
 | 用途 | G473 | 对端 | 波特率 |
 |---|---|---|---|
-| 上位机 MSP | UART2 (PA2/PA3) | LicheeRV `/dev/ttyS1` | 460800 |
+| 上位机 MSP | UART2 (PA2/PA3) | LicheeRV `/dev/ttyS0` (UART0, A16/A17) | **230400** |
 | CRSF 接收机 | UART3 (PB10/PB11) | 遥控接收机 | auto |
 | 光流+测距 | UART4 (PC10/PC11) | MTF-02P | 115200 |
+
+> ✅ **2026-10-09 实测链路打通**（LicheeRV↔FC 收发声 OK）。要点：上位机用 **UART0/ttyS0（A16/A17）**（UART1 与板载 Wi-Fi/BT 共用不可用）；**波特率 230400**（FC UART2 上限）；**TX↔RX 交叉**；UART0 console getty 需先在 `/etc/inittab` 注释掉。详见 `connection/README.md`。
 
 - 策略：**保留物理 CRSF**（`receiver_type=SERIAL`）；上位机用 `MSP RC Override`（模式**永久 ID 50**）绑 **ch8**（`aux 0 50 3 1700 2100`）接管；`msp_override_channels=15`。
 - MTF-02P 走 **MSP**：`opflow_hardware=MSP` + `rangefinder_hardware=MSP`（INAV 原生解析 `MSP2_SENSOR_OPTIC_FLOW`/`MSP2_SENSOR_RANGEFINDER`）。
@@ -86,7 +88,7 @@ new_mcu/
 ## 待办（硬件到位后，按顺序）
 
 1. **确认硬件与板级**：实际 IMU 型号、UART 焊盘引出、供电；拔桨验证电机顺序/转向、IMU 朝向。
-2. **验证 LicheeRV `/dev/ttyS1`** 已暴露且 pinmux=UART1（回环测试）。
+2. ~~验证 LicheeRV `/dev/ttyS1`~~ → ✅ **改用 `/dev/ttyS0`(UART0, A16/A17) 并已打通**（UART1 与 Wi-Fi/BT 共用）。
 3. **按 `connection/README.md` 接线并联调**：拔桨（MSP 收发 + 拨杆切换 + failsafe）→ 绑绳 → 短飞。
 4. **光流/测距标定**：`opflow_scale`、`align_opflow`；确认测距量程/单位。
 

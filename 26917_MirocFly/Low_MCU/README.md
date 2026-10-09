@@ -52,11 +52,14 @@ Low_MCU/
 
 | 用途 | G473 口 | 引脚 | 对端 | 参数 |
 |---|---|---|---|---|
-| **上位机 MSP** | UART2 | PA2/PA3 | LicheeRV `/dev/ttyS1` | **460800** |
+| **上位机 MSP** | UART2 | PA2/PA3 | LicheeRV **UART0 `/dev/ttyS0`**（A16/A17） | **230400** |
 | **CRSF 接收机** | UART3 | PB10/PB11 | 遥控接收机 | auto |
 | **光流+测距** | UART4 | PC10/PC11 | MTF-02P | 115200 |
 | 配置/调试 | USB VCP | — | i5 | 115200 |
 | （释放名额）| UART1 | — | 空 | 仅 RX，接不了外设，**必须清空** |
+
+> ✅ **上位机↔下位机链路已实测打通（2026-10-09）**：LicheeRV `UART0(/dev/ttyS0, A16/A17) @230400` ↔ FC `UART2(MSP)`，**TX/RX 交叉**。
+> 注意：LicheeRV 的 **UART1(ttyS1) 与板载 Wi-Fi/BT 共用引脚，不可用**；UART0 需先**释放 console getty**。详见 `new_mcu/connection/README.md`。
 
 - ⚠️ **必须 `serial 0 0 ...` 清空 UART1**：INAV 限**最多 3 个 MSP 端口**；默认 VCP+UART1 已占 2，再加 UART2+UART4 会超限 → 启动时 serial 配置被整体重置（详见 `new_mcu/connection/README.md`）。
 - **上位机统一接口**：`TargetInfo{ 偏移X, 偏移Y, 面积Area(∝1/距离²), 状态Status }`；链路层只换编码器（近期 MSP 摇杆值 / 远期自定义帧 `AA 55 | X | Y | Area | Status | CRC8`）。
