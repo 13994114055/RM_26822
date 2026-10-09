@@ -11,7 +11,11 @@
   - ✅ **已刷入板子**（原厂 Betaflight → 我们的 INAV），`GYRO/ACC=BMI270 OK`。
   - ✅ **上下位机对接配置已写入并持久化**（UART2=MSP 上位机 / UART3=CRSF / UART4=光流）。
   - ✅ **可在本机（i5）重编 G4 固件**（见 `new_mcu/drone/inav-g4dbg/`）。
-- 剩余：接外设（MTF-02P、CRSF 接收机、LicheeRV）实测、校准、真机联调（拔桨→绑绳→短飞）。
+  - ✅ **上位机↔下位机 MSP 链路已实测打通**（LicheeRV UART0 `/dev/ttyS0` ↔ FC UART2 @230400）。
+  - ✅ **EzTune 已关闭 + INAV 默认 PID/滤波已应用**（此前 EzTune 会覆盖手动 PID）。
+- ⏳ **当前卡点**：ANGLE 模式振荡加重；**CoG 偏左 → 起飞左翻**（桨/转向已确认正确）；**黑匣子日志待分析**；MTF-02P 光流/测距待验证（测距误差 4–5cm）。
+- 剩余：修 CoG → 黑匣子分析降 P → 拔桨/绑绳/短飞 → 光流标定 → POSHOLD/ALTHOLD。
+- ★ **开工先读 `new_mcu/AGENT_GUIDE.md`**（开发指导 + 交接 + 坑清单）。
 
 ## 目录结构
 
@@ -24,6 +28,7 @@ Low_MCU/
 │   └── 下位机MCU手册.pdf/.docx
 └── new_mcu/                  # 新主控 BetaFPV G473 工作区（详见 new_mcu/README.md）
     ├── README.md
+    ├── AGENT_GUIDE.md             # ★ 下位机开发指导 + 交接（权威文档，新 AI 先读）
     ├── connection/                # 上下位机对接方案 + 工具
     │   ├── README.md                  # 接口映射/接线/INAV 配置/验证/测试计划
     │   └── fccli.py                   # 通过 USB VCP 与 FC CLI 交互的脚本（docker 免 sudo 跑）
@@ -88,6 +93,7 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
 
 ## 参考
 
+- ★ 下位机开发指导 + 交接（新 AI 先读）：`new_mcu/AGENT_GUIDE.md`
 - 新主控详情 / 目录 / 待办：`new_mcu/README.md`
 - 对接方案 / 接线 / 测试：`new_mcu/connection/README.md`
 - 上位机：`../Host_Lichee_RV_Nano/`（总览、`AGENT_GUIDE.md`、操作手册 `diary.md`）
