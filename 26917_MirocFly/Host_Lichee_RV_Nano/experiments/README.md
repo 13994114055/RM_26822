@@ -18,6 +18,7 @@
 | 10 | 2026-09-28 | [2026-09-27_10_tdl_infer](./2026-09-27_10_tdl_infer/) | **可复用推理层**（相机+TDL检测+画框+RTSP，C 接口） | ✅ RTSP 叠加出真图 `rtsp://10.222.2.1:554/h265`（H265），~16FPS | **完成** |
 | 11 | 2026-09-29 | [2026-09-28_11_quantize](./2026-09-28_11_quantize/) | **TPU-MLIR 量化**（ONNX → cv181x INT8 cvimodel） | ✅ resnet18 → cvimodel，板上 NPU 43.9FPS | **完成**（YOLOv8n 待接） |
 | 12 | 2026-09-29 | [2026-09-29_12_armor_led](./2026-09-29_12_armor_led/) | **传统 CV 装甲板**（红/蓝 LED 灯条，通道差+几何配对） | ✅ S0+S1：透视合成图 + cv2 原型，合成集召回/精确 100%、中心误差 0.34px | **进行中**（S2 板端移植） |
+| 13 | 2026-09-30 | [2026-09-30_13_yolov8_quantize](./2026-09-30_13_yolov8_quantize/) | **YOLOv8n 量化全流程**（TDL 导出 6 分支 ONNX → TPU-MLIR INT8） | ✅ `yolov8n.onnx` → `yolov8n_cv181x_int8_sym.cvimodel`（3.4MB，占位预训练模型） | **完成**（4060 真模型到位只换 ONNX） |
 
 ## 相关文档（上层）
 - `../README.md`（项目总览）、`../agent.md`（AI 上下文）
