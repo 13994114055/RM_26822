@@ -2,7 +2,7 @@
 
 > 本文件是**上下位机对接方案**：接口映射、INAV 配置、接线、验证与测试计划。
 > 上位机侧代码在 `../../../Host_Lichee_RV_Nano/`（本方案**不改上位机代码**，仅约定串口）。
-> 状态：🟡 方案定稿（截至 2026-09-30）；**硬件接线与联调待执行**。
+> 状态：🟢 **MSP 链路已实测打通（2026-10-09）**；接线/配置见第 3、4 节。**真机联调**（修 CoG → 拔桨 → 绑绳 → 短飞）与**光流/测距验证**待执行，见 `../AGENT_GUIDE.md` 第 5 节。
 
 ---
 
@@ -97,7 +97,8 @@ INAV 限制 **最多 3 个 MSP 端口**（`MAX_MSP_PORT_COUNT=3`，见 `io/seria
 
 ## 8. 测试计划（安全渐进）
 **拔桨**（跑通 MSP 收发 + 拨杆切换 + failsafe）→ **绑绳** → **短飞**。
-上位机侧用 `msp_test monitor /dev/ttyS1` 回读 `ATTITUDE/RAW_IMU`，`inject` 验证注入。
+上位机侧用 `msp_test monitor /dev/ttyS0` 回读 `ATTITUDE/RAW_IMU`，`inject` 验证注入。
+> ⚠️ 真机联调前先修 **CoG 偏左**、并用黑匣子分析解决 **ANGLE 模式振荡**（见 `../AGENT_GUIDE.md` 第 5.3 节）。
 
 ## 9. 待办 / 后续
 - 光流 `opflow_scale`、`align_opflow` 标定；确认 MTF-02P 测距量程/单位。
@@ -105,6 +106,7 @@ INAV 限制 **最多 3 个 MSP 端口**（`MAX_MSP_PORT_COUNT=3`，见 `io/seria
 - 去除 INAV 原生 crash detection 干扰（如涉及）。
 
 ## 参考
+- ★ 下位机开发指导 + 交接：`../AGENT_GUIDE.md`
 - 下位机总览：`../README.md`；协议历史：`../../archive_at32/agent_at32.md`
 - 上位机 MSP 链路：`../../../Host_Lichee_RV_Nano/experiments/2026-09-26_07_msp_link/`
 - INAV 源码：`../drone/inav/`（`io/serial.h`、`fc/fc_msp.c`、`rx/msp_override.c`、`io/opflow_msp.c`）
