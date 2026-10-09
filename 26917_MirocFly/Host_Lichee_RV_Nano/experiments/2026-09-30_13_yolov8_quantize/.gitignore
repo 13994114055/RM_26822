@@ -1,0 +1,12 @@
+# 只保留"脚本 + 最终产物"; 忽略 TPU-MLIR 中间文件与大文件
+*.npz
+*.mlir
+*.prototxt
+work/
+*_sym/
+*.layer_group_cache.json
+*.layer_group_config.json
+shape_pattern_qtable
+_weight_map.csv
+*.ref_files.json
+calib/
