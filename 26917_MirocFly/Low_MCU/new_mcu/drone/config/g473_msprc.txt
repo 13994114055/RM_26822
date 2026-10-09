@@ -1,0 +1,34 @@
+# MirocFly 下位机 BetaFPV G473 (INAV 10.0.0) 对接配置 — 上位机 MSP + 物理 CRSF + MTF-02P 光流
+# 用法: FC 插 USB -> picocom/Configurator 进 CLI -> 逐行粘贴 -> save (或整段 batch 粘贴)
+# 前提: 拔桨! 详见 ../connection/README.md
+#
+# 端口号口径(io/serial.h): USART1=0 USART2=1 USART3=2 USART4=3 ; USB_VCP=20
+# 函数位: MSP=1 ; RX_SERIAL=64
+#
+# --- 端口 ---
+# 注意: INAV 限制最多 3 个 MSP 端口 (MAX_MSP_PORT_COUNT=3)。
+# 默认 VCP + USART1 已占 2 个; 我们要 USART2(上位机)+USART4(光流) 也用 MSP => 必须先清空 USART1。
+serial 0 0 115200 115200 0 115200        # UART1 = NONE (UART1 只有 RX 用不了; 释放 MSP 名额)
+serial 1 1 460800 460800 0 460800        # UART2 = MSP (上位机 LicheeRV /dev/ttyS1 @460800)
+serial 2 64 115200 115200 0 115200       # UART3 = RX_SERIAL (CRSF 接收机)
+serial 3 1 115200 115200 0 115200        # UART4 = MSP (MTF-02P 光流+测距, 内部 115200)
+
+# --- 接收机 ---
+set receiver_type = SERIAL
+set serialrx_provider = CRSF
+
+# --- MSP 接管 (RC 优先/硬件兜底) ---
+set msp_override_channels = 15           # 允许被 MSP 覆盖的通道 = 前4路(AETR)
+aux 0 50 3 1700 2100                     # ch8(AUX序号3) 在 [1700,2100) -> 启用 "MSP RC OVERRIDE"(永久ID 50) => 上位机接管; 否则听接收机
+# 注意: 区间右端 [1700,2100) 不含 2100; 上电后在 Receiver 页确认 ch8 实际脉宽
+
+# --- 光流 + 测距 (MTF-02P 走 MSP) ---
+set opflow_hardware = MSP
+set rangefinder_hardware = MSP
+# set opflow_scale = <实飞标定, 默认 10.5>
+# set align_opflow  = <按安装朝向, 默认 CW0_DEG_FLIP>
+
+# --- 安全 ---
+set failsafe_procedure = DROP
+
+save
