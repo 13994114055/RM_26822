@@ -9,7 +9,8 @@
 # 注意: INAV 限制最多 3 个 MSP 端口 (MAX_MSP_PORT_COUNT=3)。
 # 默认 VCP + USART1 已占 2 个; 我们要 USART2(上位机)+USART4(光流) 也用 MSP => 必须先清空 USART1。
 serial 0 0 115200 115200 0 115200        # UART1 = NONE (UART1 只有 RX 用不了; 释放 MSP 名额)
-serial 1 1 460800 460800 0 460800        # UART2 = MSP (上位机 LicheeRV /dev/ttyS1 @460800)
+serial 1 1 230400 230400 0 230400        # UART2 = MSP (上位机 LicheeRV; G473 UART2 上限 230400)
+#   ↑ 上位机侧: /dev/ttyS0 (UART0, 引脚 A16/A17) @230400; 与 UART2 交叉接线 A16->FC RX2/PA3, A17<-FC TX2/PA2
 serial 2 64 115200 115200 0 115200       # UART3 = RX_SERIAL (CRSF 接收机)
 serial 3 1 115200 115200 0 115200        # UART4 = MSP (MTF-02P 光流+测距, 内部 115200)
 

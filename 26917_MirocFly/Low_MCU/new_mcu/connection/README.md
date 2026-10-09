@@ -13,7 +13,7 @@
 
 | 用途 | G473 口 | 引脚 (TX/RX) | 对端 | 波特率 | INAV `serial` 端口号 |
 |---|---|---|---|---|---|
-| **上位机 MSP** | UART2 | PA2 / PA3 | LicheeRV `UART1` = `/dev/ttyS1` | **460800** | `serial 1` |
+| **上位机 MSP** | UART2 | PA2 / PA3 | LicheeRV **UART0** = `/dev/ttyS0`（引脚 **A16/A17**） | **230400** | `serial 1` |
 | **CRSF 接收机** | UART3 | PB10 / PB11 | 物理遥控接收机 | auto (CRSF) | `serial 2` |
 | **光流 + 测距** | UART4 | PC10 / PC11 | MTF-02P | **115200** | `serial 3` |
 | 配置/调试 | USB VCP | — | i5（USB） | — | 始终 MSP |
@@ -23,21 +23,30 @@
 
 > ⚠️ 说明：`FUNCTION_OPTICAL_FLOW`(=16384) 只给 **CXOF** 光流用；**MTF-02P 走 MSP**（见第 5 节），所以 UART4 配 **MSP(1)**，不是 16384。
 
-## 3. 物理接线
+## 3. 物理接线（已实测打通 2026-10-09）
 ```
-G473 UART2 TX(PA2)  ──>  LicheeRV UART1 RX
-G473 UART2 RX(PA3)  <──  LicheeRV UART1 TX        （TX↔RX 交叉）
-GND                 ───  GND                      （必须共地）
+G473 UART2 TX(PA2)  ──>  LicheeRV UART0 RX (A17)
+G473 UART2 RX(PA3)  <──  LicheeRV UART0 TX (A16)     （TX↔RX 交叉！接反 = 不通）
+GND                 ───  GND                         （必须共地）
 电平：两侧均 3.3V
 UART4：MTF-02P 模块接 G473 UART4（TX/RX/GND，供电按模块要求）
 UART3：CRSF 接收机接 G473 UART3
 ```
-> G473 的 UART 焊盘以**板子丝印/BetaFPV 文档**为准；LicheeRV 用 **2×14 排针**上的 UART1。
+> G473 的 UART 焊盘以**板子丝印/BetaFPV 文档**为准。LicheeRV 用 **2×14 排针**：
+> **UART0 = A16(TX, 第18脚) / A17(RX, 第19脚) → `/dev/ttyS0`**。
+>
+> ⚠️ **为什么不用 UART1/ttyS1**：LicheeRV 的 **UART1 引脚（A18/A19/A28/A29）与板载 Wi-Fi/BT 芯片 AIC8800D 共用**（原理图 `BT_RTX/BT_CTS/BT_TXD/BT_RXD`，`hci0 Bus: SDIO`）→ 冲突。故改用干净空闲的 **UART0**。
+> ⚠️ **UART0 默认是调试 console**：需**释放 getty**（本实验已把 `/etc/inittab` 的 `sole::respawn:/sbin/getty -L console ...` 行注释掉；内核 `console=ttyS0` 仍保留，但 `loglevel=0` 基本不打印）。释放后 `/dev/ttyS0` 才可被 MSP 使用。
+> ⚠️ **波特率 = 230400**：G473 的 UART2 实测上限 230400（更高不通）。
+
+### ttyS ↔ UART 对应（SG2002）
+`/dev/ttyS0`=UART0(0x04140000)、`ttyS1`=UART1(0x04150000)、`ttyS2`=UART2(0x04160000)、`ttyS3`=UART3(0x04170000)。
+判定：`cat /proc/tty/driver/serial`（每行 `mmio:` 基址）；或设备树别名 `ls /proc/device-tree/aliases/`。
 
 ## 4. INAV CLI 配置
 见可粘贴批处理：`../drone/config/g473_msprc.txt`。要点：
 - **`serial 0 0 ...`（UART1 = 清空）—— 必须！** 见下方"⚠️ MSP 端口数上限"。
-- `serial 1 1 460800 ...`（UART2 = 上位机 MSP）
+- `serial 1 1 230400 ...`（UART2 = 上位机 MSP，**实测上限 230400**）
 - `serial 2 64 ...`（UART3 = 串口接收机 CRSF）+ `set receiver_type = SERIAL`、`set serialrx_provider = CRSF`
 - `serial 3 1 115200 ...`（UART4 = MSP，给 MTF-02P）
 - `set msp_override_channels = 15`（前 4 路 AETR 可被 MSP 覆盖）
@@ -70,14 +79,15 @@ INAV 限制 **最多 3 个 MSP 端口**（`MAX_MSP_PORT_COUNT=3`，见 `io/seria
 - 因此 UART4 配 **MSP** 即可，MTF-02P 会同时上报光流与测距。
 - `opflow_scale`/`align_opflow` 需**实飞标定**（先留注释）。
 
-## 6. 上位机侧（不改代码，仅约定）
-- 串口：LicheeRV **`/dev/ttyS1` @460800**（当前定约定）。
+## 6. 上位机侧（已实测）
+- 串口：LicheeRV **`/dev/ttyS0` @230400**（UART0，引脚 A16/A17）。
 - 现有程序：`Host_Lichee_RV_Nano/experiments/2026-09-26_07_msp_link/`（`msp_test`）、`.../08_vision_control/`（`green_fly`）。
-  真硬件命令形如：`./msp_test inject /dev/ttyS1 460800 10` / `monitor /dev/ttyS1 460800`。
-- **前提**：LicheeRV 镜像需**已暴露 `/dev/ttyS1` 且 pinmux=UART1**（scpcom 镜像未必开，见验证清单）。
+  真硬件命令形如：`./msp_test inject /dev/ttyS0 230400 10` / `monitor /dev/ttyS0 230400`。
+- **前提**：LicheeRV 的 **UART0 console 已释放**（`/etc/inittab` 注释 console getty）；`/dev/ttyS0` 可被 MSP 打开。
+- 实测工具：`connection/msp_probe`（发 MSP 请求读响应）+ `fccli.py`（经 USB VCP 配 FC）。
 
 ## 7. 接线前验证清单（硬件到位时逐条过）
-1. **LicheeRV `/dev/ttyS1` 存在且可用**：先做**回环**（TX↔RX 短接，echo/读到自身）确认 pinmux。
+1. **LicheeRV `/dev/ttyS0`(UART0, A16/A17) 可用**：先**释放 console getty**，再**回环**（A16↔A17 短接，用 `msp_probe /dev/ttyS0 <baud>` 读到自身帧）确认。
 2. **G473 UART2/3/4 焊盘**按丝印核实。
 3. **共地 + 3.3V 电平 + TX↔RX 交叉**。
 4. FC 插 i5 → 出现 `/dev/ttyACM0` → `picocom /dev/ttyACM0` 进 CLI → 粘 `g473_msprc.txt` → `save`（**拔桨**）。
