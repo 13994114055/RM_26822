@@ -16,6 +16,7 @@ Host_Lichee_RV_Nano/CVI_HW_OpenCV/
 # ---- 下位机 new_mcu 工作区: 只收录文档/固件/补丁, 忽略大体积与第三方 ----
 Low_MCU/new_mcu/drone.zip
 Low_MCU/new_mcu/drone/inav/
+Low_MCU/new_mcu/drone/inav-g4dbg/
 Low_MCU/new_mcu/drone/betafpvg47/bf-source-4.5.1/
 Low_MCU/new_mcu/drone/tools/esc-configurator-src/
 Low_MCU/new_mcu/drone/.tools/Ruby40/
