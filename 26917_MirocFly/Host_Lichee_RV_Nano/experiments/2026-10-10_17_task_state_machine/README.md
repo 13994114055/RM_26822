@@ -41,6 +41,17 @@ LD_LIBRARY_PATH=/mnt/system/usr/lib:/mnt/system/usr/lib/3rd \
 ```
 - 第 1 轮（`area_impact` 未稳）也见过 `SEEK→APPROACH` 稳定跟踪：`off=(94,-146) RC=(1547,1573)`。
 
+**另一次：只靠 IMU 敲击触发**（关闭面积判据，绿目标保持在画面里 + 敲击飞控）：
+```
+[t=119.55] >>> APPROACH | target found
+[t=121.06] >>> IMPACT   | IMPACT! (imu spike)     ← 敲击触发
+[t=122.07] >>> RECOVER  | impact hold done
+[t=123.08] >>> RTH      | recovered -> RTH
+[t=131.17] >>> LAND     | home reached(dry)
+[t=132.18] >>> DONE     | landed
+```
+→ **`SEEK↔APPROACH` 跟随目标、`APPROACH→IMPACT`(IMU) 均实测通过。**
+
 ## 注意 / 待办
 - **干跑**：TAKEOFF/RTH 未实际给油/移动（占位计时）；真机需接油门/位置。
 - **IMU 撞击已实测触发**（2026-10-10）：敲击飞控 → `*** IMPACT ***`（`|a|` 峰值 5.35g）；故 `APPROACH→IMPACT` 的 **IMU 判据**在真机可用，视觉面积判据作补充。

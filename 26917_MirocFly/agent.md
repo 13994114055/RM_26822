@@ -51,7 +51,7 @@ LicheeRV Nano (SG2002) 上位机 —— Linux视觉层: 采集→识别→目标
 | 阶段 | 内容 | 状态 | 下一步 |
 |---|---|---|---|
 | 0 相机出帧 | 交叉编译 + CSI 抓帧 | 🟢 **`experiments/…/04_vision_module` Form A 出真图**；`05_rtsp_stream` RTSP 预览打通（B7/B9/B11 已解） | 阶段 1（HSV）或 MSP 链路 |
-| 1 绿色荧光 | HSV → 视觉→控制闭环（INAV） | 🟡 **检测(06)+MSP链路(07)均已通**；二者闭环未接、待下位机 | 闭环联调(offset→RC→注入) |
+| 1 绿色荧光 | HSV → 视觉→控制闭环（INAV） | 🟢 **台架闭环全通**：检测(06)+链路(07)+打磨(14 EMA/丢检滞回/FC遥测)+可视化(15 RTSP叠加)+撞击(16 IMU)+状态机干跑(17) | 上电池→短悬停校准 kp/符号/相机pitch偏置 |
 | 2 不规则物体 | YOLOv8n NPU 部署 → 撞击 → 30s 返航 | 🟡 **部署(09/10)+量化(11)已通**；自训装甲模型待 4060 | 训练+导出 → 量化 → 部署 |
 | 3 自写固件 | 下位机自研飞控 | ⏳ 远期 | 新主控 G473 已重购、INAV G4 能飞；待上位机对接后推进 |
 
@@ -73,6 +73,7 @@ LicheeRV Nano (SG2002) 上位机 —— Linux视觉层: 采集→识别→目标
 - `experiments/2026-09-28_11_quantize/`（✅量化打通）：TPU-MLIR（docker 镜像走算能 CDN + `docker load`；容器内 `pip install tpu_mlir` 后 commit）。`resnet18.onnx` → `resnet18_cv181x_int8_sym.cvimodel`，板上 NPU 43.9FPS。三段式：`model_transform→run_calibration→model_deploy --processor cv181x --quantize INT8`。坑见 B15。量化在 Linux i5；训练在 Win11(4060)。
 - `experiments/2026-09-29_12_armor_led/`（🟡传统CV装甲板 S0+S1）：**并行兜底/预研**，不依赖训练。S0 纯 PIL + 自解单应生成**透视梯形**合成图 21 张（含真值 `labels.csv`）；S1 `pc_tune/detect_armor.py`（**cv2**，PC venv 装 `opencv-python 5.0.0` 与板端 opencv-mobile 5.0.0 对齐）：通道差→形态学→minAreaRect→同色**松弛配对**→**四点四边形中心**，合成集**召回/精确 100%、中心误差 0.34px**。坑见 B16（灯条长轴取错对角线；中心受 boxPoints 内外边影响）。S2 板端移植待做。
 - 面试复盘文档 `Host_Lichee_RV_Nano/interview_notes.md`（按项目阶段组织的 Q&A）；知识点速查 `edge_ai_cheatsheet.md`。
+- **闭环系列（台架，2026-10-10）**：`14_green_fly_smooth`（EMA 平滑+丢检滞回+FC 遥测回读）、`15_closedloop_overlay`（RTSP 上叠加 检测框/offset/RC/FC姿态）、`16_impact_detect`（`RAW_IMU` 加速度突增撞击，敲击实测峰值 5.35g）、`17_task_state_machine`（干跑状态机 IDLE→…→DONE，视觉/IMU 撞击，**相机 pitch 偏置参数**）。
 
 **下位机** `Low_MCU/`
 - AT32 方案**已冻结**（`archive_at32/agent_at32.md`）。
