@@ -71,15 +71,15 @@ IDLE → ARM → TAKEOFF → SEEK(搜索目标) → APPROACH(接近撞击)
 ## 硬件规格速览
 
 - **上位机**：LicheeRV-Nano（SG2002，256MB DDR3，1TOPS NPU，MIPI-CSI 摄像头，USB-RNDIS 网络）
-- **下位机（新）**：**BetaFPV G473（STM32G474，BMI270 IMU，四合一 DSHOT ESC）**，与烧毁的同款**已重购**；**自研移植 INAV 10.0.0（STM32G4）已能飞**，但**尚未与上位机对接**（接口映射未定）
+- **下位机（新）**：**BetaFPV G473（STM32G474，BMI270 IMU，四合一 DSHOT ESC）**，与烧毁的同款**已重购**；**自研移植 INAV 10.0.0（STM32G4）已能飞**；**本土化已落地**：上位机 MSP（UART2 @230400）链路已打通；**2026-10-10 解决"离地即翻/自旋"**（根因＝**电机输出编号与物理接线错位**；mixer 轮换版 + `motor_direction_inverted=OFF` + `align_board_roll=1800`），现**能起飞、不再自旋**。详见 `Low_MCU/new_mcu/AGENT_GUIDE.md`
 - **下位机（原，已淘汰）**：AT32F435（288MHz 超频，1MB Flash/128KB SRAM，直驱空心杯——升力不足）
 - **接口约定（⚠️ AT32 阶段历史约定，新板未落实）**：UART1=MSP(上位机)、UART7=CRSF(RC)、UART5=光流、SPI1=IMU、I2C2=磁力计/气压计；波特率 UART1=460800、UART5=115200、UART7=4800。**新板 G473 资源不同（仅 UART1~4+VCP），需重映射**
 
 ## 当前状态与下一步
 
 - **已打通**：上位机镜像（scpcom）SSH 可登录；**相机链路全通**——板载 `test_mmf` 出真图，且**自写相机层 `experiments/2026-09-26_04_vision_module/`（Form A）出真图**、**`experiments/2026-09-26_05_rtsp_stream/` 打通 RTSP 实时预览**、**`experiments/2026-09-26_06_hsv_green/` 打通 HSV 绿色检测（输出 offset/area）**、**`experiments/2026-09-26_07_msp_link/` 打通 MSP 链路（PTY 模拟 FC 自测）**、**`experiments/2026-09-26_08_vision_control/` 写出"识别绿色并飞向"闭环程序**；**阶段 2 的 NPU 部署与量化通路已通**（`experiments/2026-09-26_09_npu_demo/`：底层 cviruntime + 高层 TDL，官方 YOLOv8n INT8 检测 17.6 FPS；`experiments/2026-09-27_10_tdl_infer/`：**可复用推理层 + 相机检测 + RTSP 叠加**；`experiments/2026-09-28_11_quantize/`：**TPU-MLIR 把 ONNX 量化成 cv181x INT8 cvimodel，板上 NPU 43.9 FPS**）；`experiments/2026-09-29_12_armor_led/`：**传统 CV 装甲板（红/蓝 LED 灯条）PC 原型**，合成集召回/精确 100%、中心误差 0.34px，不依赖训练）。已克隆 scpcom 源码树 `LicheeSG-Nano-Build_scpcom`；opencv-mobile/TDL 参考就绪。
-- **黑帧根因（已解）**：**两问题叠加**——① 中间件版本混用（链了 sipeed，须用 **scpcom 公有头 + 板上 scpcom 库**）；② 抓到**流水线启动首帧**（须先丢前导帧）。次要：① 输出文件自动清理（限制 SD 占用）；② 下位机新主控（G473）已重购、固件能飞，待与上位机对接。进度见 `Low_MCU/README.md`。
-- **下一步**：① NPU 检测接到**相机实时帧**（`09` 步骤3）；② 装甲板方案（1 类检测 + HSV 判红蓝）；③ 自训/量化（用 N 卡笔记本，量化转换是门槛）；④ 下位机（G473）**对接**后完成视觉→控制闭环（固件已能飞，待本土化：接口映射 + 上位机 MSP + 光流）。
+- **黑帧根因（已解）**：**两问题叠加**——① 中间件版本混用（链了 sipeed，须用 **scpcom 公有头 + 板上 scpcom 库**）；② 抓到**流水线启动首帧**（须先丢前导帧）。次要：① 输出文件自动清理（限制 SD 占用）；② 下位机主控更替已落地（G473 能飞、MSP 链路已通、**方向类问题已解决**）。进度见 `Low_MCU/README.md`。
+- **下一步**：① 无电池期间优先**上位机侧**（MSP 链路**台架联调** + 视觉闭环）；② NPU 检测接到**相机实时帧**（`09` 步骤3）；③ 装甲板方案（1 类检测 + HSV 判红蓝）；④ 自训/量化（用 N 卡笔记本，量化转换是门槛）；⑤ 有电池后：短悬停验证自稳 → 黑匣子定 PID → 视觉→控制真机闭环。
 
 ## 文档导航
 

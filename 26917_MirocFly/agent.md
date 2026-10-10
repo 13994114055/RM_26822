@@ -76,7 +76,7 @@ LicheeRV Nano (SG2002) 上位机 —— Linux视觉层: 采集→识别→目标
 
 **下位机** `Low_MCU/`
 - AT32 方案**已冻结**（`archive_at32/agent_at32.md`）。
-- 新主控 = **BetaFPV G473（STM32G474）**，与烧毁的同款**已重购**；**自研移植 INAV 10.0.0（STM32G4）当前能飞**；**尚未本土化**（上位机 MSP / 光流 / 接口映射未定）。工作区 `new_mcu/drone/`，详见 `new_mcu/README.md`。
+- 新主控 = **BetaFPV G473（STM32G474）**，与烧毁的同款**已重购**；**自研移植 INAV 10.0.0（STM32G4）当前能飞**；**本土化已落地**（上位机 MSP UART2@230400 链路已打通；CRSF/光流接口已配）。**2026-10-10 解决"离地即翻/自旋"**（根因＝**电机输出编号与物理接线错位**；修复：mixer 轮换版 + `motor_direction_inverted=OFF` + `align_board_roll=1800`）。工作区 `new_mcu/drone/`，详见 `new_mcu/README.md` 与 `new_mcu/AGENT_GUIDE.md`。
 
 ## 6. 技术要点速查
 
@@ -102,5 +102,5 @@ LicheeRV Nano (SG2002) 上位机 —— Linux视觉层: 采集→识别→目标
 2. ION 泄漏：Form A/RTSP 正常退出（SIGTERM）可回收（实测 used=0）；**`kill -9` 会泄漏**，需干净重启；程序清理路径在异常分支仍待加固。
 3. **不需要**构建 scpcom 的 kernel/middleware（app 只要公有头 + 板上库）。
 4. NPU INT8 对自定义目标精度（HSV 兜底）；**缺 TDL SDK**。
-5. 下位机新主控 G473：**上位机对接（MSP）/ 光流 / 接口映射**尚未做（固件已能飞）。
+5. 下位机 G473：**上位机 MSP 链路已打通**；**"翻/自旋"已解决（电机编号错位）**；当前等电池做**短悬停自稳验证 / PID**；**光流 MTF-02P 待验证**。
 6. 撞击检测采样率受限 → 与视觉联合判定。
