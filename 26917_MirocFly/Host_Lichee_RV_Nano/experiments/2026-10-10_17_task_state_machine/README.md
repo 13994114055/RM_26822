@@ -43,7 +43,7 @@ LD_LIBRARY_PATH=/mnt/system/usr/lib:/mnt/system/usr/lib/3rd \
 
 ## 注意 / 待办
 - **干跑**：TAKEOFF/RTH 未实际给油/移动（占位计时）；真机需接油门/位置。
-- **IMU 撞击未实测触发**：轻敲似不足以让 FC 回读的 `acc` 突增（疑 `MSP_RAW_IMU` 加速度被滤波）→ 先用**视觉面积**判据演示；后续可换更灵敏的 IMU 源或降阈值。
+- **IMU 撞击已实测触发**（2026-10-10）：敲击飞控 → `*** IMPACT ***`（`|a|` 峰值 5.35g）；故 `APPROACH→IMPACT` 的 **IMU 判据**在真机可用，视觉面积判据作补充。
 - `kp`/roll-pitch 符号仍待实机标定；相机 pitch 偏置待换模具后标定。
 - 相机程序互斥；退出 SIGTERM（ION）。
 
