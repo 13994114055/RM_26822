@@ -1,0 +1,6 @@
+task_sm
+*.o
+*.raw
+*.bmp
+*.png
+*.jpg
