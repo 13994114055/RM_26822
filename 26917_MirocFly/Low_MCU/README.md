@@ -13,8 +13,9 @@
   - ✅ **可在本机（i5）重编 G4 固件**（见 `new_mcu/drone/inav-g4dbg/`）。
   - ✅ **上位机↔下位机 MSP 链路已实测打通**（LicheeRV UART0 `/dev/ttyS0` ↔ FC UART2 @230400）。
   - ✅ **EzTune 已关闭 + INAV 默认 PID/滤波已应用**（此前 EzTune 会覆盖手动 PID）。
-- ⏳ **当前卡点**：ANGLE 模式振荡加重；**CoG 偏左 → 起飞左翻**（桨/转向已确认正确）；**黑匣子日志待分析**；MTF-02P 光流/测距待验证（测距误差 4–5cm）。
-- 剩余：修 CoG → 黑匣子分析降 P → 拔桨/绑绳/短飞 → 光流标定 → POSHOLD/ALTHOLD。
+- ✅ **"翻/自旋"已解决（2026-10-10）**：根因＝**电机输出编号与物理接线错位**（飞控倒装重装后未重映射）。修复：mixer "180° 轮换"版 + `motor_direction_inverted=OFF` + `align_board_roll=1800`。**能起飞、不再自旋**（排查法见 `new_mcu/AGENT_GUIDE.md` §5.5）。
+- ⏳ **当前卡点（等电池）**：ANGLE 自稳/微偏航待验证→视情调 PID；MTF-02P 光流/测距待验证（测距误差 4–5cm）。**无电池期间优先上位机侧**（链路+视觉）。
+- 剩余：（有电池）短悬停验证→黑匣子定 PID→拔桨/绑绳/短飞→光流标定→POSHOLD/ALTHOLD。
 - ★ **开工先读 `new_mcu/AGENT_GUIDE.md`**（开发指导 + 交接 + 坑清单）。
 
 ## 目录结构

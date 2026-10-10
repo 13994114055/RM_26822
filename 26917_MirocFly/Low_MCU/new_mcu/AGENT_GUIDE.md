@@ -132,6 +132,7 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
 - 上下位机 MSP 链路打通（UART0/ttyS0@230400）。
 - serial 配置持久化 bug（根因 `MAX_MSP_PORT_COUNT=3`，解法清空 UART1）。
 - UART1/ttyS1 与 AIC8800 冲突诊断；释放 UART0 console。
+- ✅ **"离地即翻/自旋"根因（2026-10-10）**：**电机输出编号 M1–M4 与物理接线错位**（飞控倒装 180° 重装后未重映射）→ 姿态修正发给了错误电机 → 发散（翻/自旋）。**修复**：mixer 改成匹配真实编号的"180° 轮换"版 + `motor_direction_inverted=OFF` + `align_board_roll=1800`（倒装仅靠它补传感器朝向）。**现能起飞、不再自旋**。排查法见 §5.5；基线 dump：`drone/firmware/INAV_10.0.0_cli_20261010_dirfix.txt`。
 
 ### 5.2 ✅ EzTune 关闭 + INAV 默认 PID（Plan A）
 - **背景**：INAV 的 **EzTune** 特性在开启时会**覆盖** `mc_p/i/d`（每次启动重算）；此前 `ez_enabled=ON`（`ez_response≈92`），导致 PID 不受手动配置控制。
@@ -141,18 +142,41 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
 
 ### 5.3 ⏳ 已知问题（**当前卡点**）
 1. **ANGLE 模式振荡加重**：Plan A 之后，ANGLE 自稳模式振荡更明显（此前用户在 ACRO 模式）。需要**黑匣子分析 + 降低 P**。
-2. **CoG 偏左 → 起飞左翻**：整机重心偏左，左侧电机需更大推力；**桨/转向已确认正确**，用户此前**未在 ANGLE 模式**测过。
-3. **黑匣子日志待分析**：已导出 `~/Downloads/blackbox_log_2026-10-09_224606.TXT`（原始 INAV blackbox，表头显示 EzTune 配置：`rollPID:36,82,24,80 ... dterm_lpf_hz:105 gyro_lpf_hz:110 tpa_rate:20`）。**分析未做**。
-   - 环境缺 `blackbox_decode` / Blackbox Explorer → 需先**构建 blackbox-tools**或**自写解析器**（执行模式），再做 numpy FFT（`gyroADC[0..2]` / `motor[0..3]` / `attitude`）定位振荡频率 → 给 PID 建议。
+2. ~~**CoG 偏左 → 起飞左翻**~~ → **已澄清（2026-10-10）**：所谓"左翻/自旋"实为**电机编号错位**（见 §5.1/§5.5），**不是 CoG、也不是 PID**；修复后能飞。CoG 仍偏左值得物理核对，但**不再是卡点**。
+3. **ANGLE 自稳/PID（有电池后再调）**：能飞，但需在 ANGLE 短悬停看**是否振荡/慢漂**再决定是否降 P/调滤波。
+   - 本机已具备**自写 INAV blackbox v2 解码器**（直接读 `~/Downloads/blackbox_log_*.TXT`，出 `roll/pitch/yaw`、`gyroADC`、`motor`）：无需 `blackbox_decode`。
+   - 已分析：`blackbox_log_2026-10-10_152838/160315/162041/164110.TXT` → 旧配置下是**方向类错误（翻/自旋）**，**并非 PID 振荡**；也印证"先修方向、再谈 PID"。
+   - 待办：短悬停取新日志 → 看 `gyroADC/axisP/axisD/motor` 的振荡频率/幅度 → 给 P/D/滤波建议。
 4. **MTF-02P 光流/测距未验证**：目标 POSHOLD/ALTHOLD（RTH 不用光流）。测距**误差 4–5cm**（规格：<2m 时 2cm、>2m 时 1.5%），原因待查。光流需在 INAV `status` 确认 `OPFLOW`/`RANGEFINDER` 就绪，或 `debug_mode=FLOW`。
    - 手册：https://micoair.cn/zh/docs/sensors/sensors/mtf-02-02p-sensors
 
-### 5.4 待办阶梯（硬件到位后按序）
-1. **修 CoG**（物理配重）→ ANGLE 模式验证自稳不再左翻。
-2. **黑匣子分析 → 降 P/调滤波**（小四轴 + 本地板关了动态滤波，PID 要保守）。
+### 5.4 待办阶梯
+0. ~~方向类问题~~ → ✅ **已完成（2026-10-10）**。**无电池期间优先做"上位机侧"**（MSP 链路台架联调 + 视觉），飞行项等电池。
+1. （有电池后）拔桨→绑绳→短悬停：确认自稳、**无明显自旋/慢漂**。
+2. 取 ANGLE 黑匣子 → 解析 → 视振荡决定是否**降 P/调滤波**（小四轴 + 本板关了动态滤波，PID 保守）。
 3. **拔桨**联调：MSP 收发、ch8 拨杆切换、failsafe。
-4. **绑绳 → 短飞**。
+4. 物理核对 CoG（仍偏左则配重）。
 5. **MTF-02P 标定**（`opflow_scale`、`align_opflow`）→ POSHOLD/ALTHOLD。
+
+### 5.5 ✅ 方向类问题排查法（编号 / 朝向 / 混控 / yaw 符号）
+> 教训：**"离地即翻/自旋/乱飘" 大概率是方向类问题，不是 PID**。调 PID 前先把"三轴方向"验对。
+
+**概念分工（务必别混用）**
+- `align_board_roll/pitch/yaw`：只补**传感器朝向**（飞控倒装/旋转 → 改这里）。
+- `mmix`（电机混控）：决定"逻辑 roll/pitch/yaw → 哪个**输出**"。**旋转飞控不影响它**；只有**电机接线/编号错位**才改它。
+- `motor_direction_inverted`：**只翻 yaw 符号**（`mixer.c:241` 置 `motorYawMultiplier=-1`），不动 roll/pitch。
+
+**本次事故**：飞控倒装(roll 180°) + 电机编号错位。曾用"镜像 mixer"去补 → roll/pitch 反 → **翻**；换回又因 `motor_direction_inverted` 错 → **yaw 自旋**。正解 = mixer 换成匹配真实编号的**180° 轮换版** + `motor_direction_inverted=OFF`。
+
+**改硬件后的"5 分钟方向自检"（拔桨！）**
+1. **板朝向**：水平放 → `attitude` roll/pitch≈0；抬机头→同向；抬右侧→同向。（不对 → 改 `align_board_*`）
+2. **电机编号/转向**（Configurator `Motors` 页）：M1–M4 对应的**物理角位/旋向**与图示一致。
+3. **闭环方向**（ANGLE、低-中油门、拔桨）：
+   - 压机头下 → **前桨加速**；压哪侧下 → **该侧电机加速**；拧偏航 → **反向抵抗**。
+   - 哪个轴帮倒忙 → 对应改 `align_board`/`mmix`/`motor_direction_inverted`，**一次只改一处**。
+4. 通过再上桨，**绑绳 → 短飞**。
+
+**工具**：① 自写 INAV blackbox v2 解码器（读 `~/Downloads/blackbox_log_*.TXT`）；② 台架 `msp_live.py`（读 `ATTITUDE/RAW_IMU/MOTOR`）。
 
 ---
 
@@ -167,6 +191,10 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
 7. **`inav-g4dbg/`、`inav/`、`drone.zip` 等均 gitignore**（不入库）；改固件只在 `inav-g4dbg/` 做以保护原树。
 8. **权限/容器**：`/dev/ttyACM0` 需 docker `--device`；docker bridge 网络坏 → 用 `--network none`（离线）或 `--network host`（联网装包）。
 9. **Configurator 独占 VCP**：与 `fccli.py` 冲突，先关。
+10. **改硬件（换板/重焊电机/换桨）后必做"三轴方向自检"**（§5.5），否则症状五花八门（翻/自旋/乱飘），极易误判成 PID/CoG。
+11. **别用 `mmix` 去补传感器朝向**：飞控旋转只改 `align_board_*`；改 `mmix` 会"双重补偿"→ 翻。
+12. **`motor_direction_inverted` 只管 yaw**（`mixer.c:241`）：yaw 自旋/反向时先查它。
+13. **INAV 电机编号 ≠ 物理编号**是高频坑：`mmix` 的行号 = **输出通道**，务必与真实电机一一对齐（本次主因）。
 
 ---
 
