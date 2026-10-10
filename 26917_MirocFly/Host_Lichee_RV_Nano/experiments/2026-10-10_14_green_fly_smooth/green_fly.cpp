@@ -158,6 +158,12 @@ int main(int argc, char *argv[])
 	for (int i = 0; i < 16; i++) ch[i] = 1500;
 	ch[2] = throttle;
 
+	/* ---- FC 遥测回读 (状态反馈) ---- */
+	msp_parser_t rx; msp_parser_init(&rx);
+	int tel_ok = 0, rx_bytes = 0;
+	int fc_roll = 0, fc_pitch = 0, fc_yaw = 0;
+	int fc_ax = 0, fc_ay = 0, fc_az = 0;
+
 	/* ---- 平滑/滞回状态 ---- */
 	double sx = 0, sy = 0;                 /* EMA 平滑后的偏移 */
 	bool tracking = false;                 /* 是否处于跟踪(有可下发目标) */
@@ -236,6 +242,38 @@ int main(int argc, char *argv[])
 		}
 		msp_send_set_raw_rc(fd, ch, 16);
 		sent_cnt++;
+
+		/* ---- 请求并解析 FC 遥测 (非阻塞) ---- */
+		msp_send_request(fd, MSP_ATTITUDE);
+		msp_send_request(fd, MSP_RAW_IMU);
+		{
+			fd_set rf; FD_ZERO(&rf); FD_SET(fd, &rf);
+			struct timeval tv = {0, 8000};   /* 8ms, 够 UART2 往返 */
+			if (select(fd + 1, &rf, NULL, NULL, &tv) > 0) {
+				uint8_t b[512], dir, cmd, pl[256], len;
+				int n = (int)read(fd, b, sizeof(b));
+				if (n > 0) { rx_bytes += n; }
+				for (int i = 0; i < n; i++) {
+					if (msp_parser_feed(&rx, b[i], &dir, &cmd, pl, &len)) {
+						if (cmd == MSP_ATTITUDE && len >= 6) {
+							fc_roll = (int16_t)(pl[0] | (pl[1] << 8));
+							fc_pitch = (int16_t)(pl[2] | (pl[3] << 8));
+							fc_yaw = (int16_t)(pl[4] | (pl[5] << 8));
+							tel_ok++;
+						} else if (cmd == MSP_RAW_IMU && len >= 6) {
+							fc_ax = (int16_t)(pl[0] | (pl[1] << 8));
+							fc_ay = (int16_t)(pl[2] | (pl[3] << 8));
+							fc_az = (int16_t)(pl[4] | (pl[5] << 8));
+						}
+					}
+				}
+			}
+		}
+		if (tel_ok && (seq % 30 == 0))
+			printf("  [FC] att roll=%.1f pitch=%.1f yaw=%.1f acc=(%d,%d,%d) rx_bytes=%d\n",
+			       fc_roll / 10.0, fc_pitch / 10.0, fc_yaw / 10.0, fc_ax, fc_ay, fc_az, rx_bytes);
+		else if (!tel_ok && (seq % 30 == 0))
+			printf("  [FC] no telemetry yet (rx_bytes=%d)\n", rx_bytes);
 
 		seq++;
 		if (frames > 0 && seq >= frames) break;
