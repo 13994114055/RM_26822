@@ -195,6 +195,7 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
 11. **别用 `mmix` 去补传感器朝向**：飞控旋转只改 `align_board_*`；改 `mmix` 会"双重补偿"→ 翻。
 12. **`motor_direction_inverted` 只管 yaw**（`mixer.c:241`）：yaw 自旋/反向时先查它。
 13. **INAV 电机编号 ≠ 物理编号**是高频坑：`mmix` 的行号 = **输出通道**，务必与真实电机一一对齐（本次主因）。
+14. **FC 在 CLI 模式时，UART2 的 MSP 不响应**：用 USB 进 CLI 读/改配置后，链路会短暂 `NO RESPONSE` → `save`（重启）或 `exit` 回正常模式，并**等 ~15–20s** 再测（重启后 UART2 MSP 就绪有延迟）。别误判成"接错线"。
 
 ---
 
