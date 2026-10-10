@@ -1,0 +1,6 @@
+loop_overlay
+*.o
+*.raw
+*.bmp
+*.png
+*.jpg
