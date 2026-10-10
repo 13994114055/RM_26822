@@ -1,0 +1,35 @@
+# 2026-10-10_16_impact_detect（实验）
+
+**目的**：**撞击检测**——轮询 FC 的 `MSP_RAW_IMU`(102)，用**加速度模长突增**判"撞击"，为任务状态机（IMPACT → 自稳 → 返航）铺路。
+
+## 判据（与量纲无关，稳健）
+- 维护慢速**基线** `baseline`（EMA，只在偏差不大时更新）= 静止时的 `|a|` 当 1g 参考；
+- 当 `| |a|_瞬时 − baseline | > thr × ref` 且过冷却时间 → 判 `*** IMPACT ***`，并**立即重锁基线**防连发。
+
+> 本板 `MSP_RAW_IMU` 的加速度静止模长≈**512 LSB**（不是 2048/g；`(x,y,z)≈(38,-9,-512)`，与 roll≈-180° 自洽）→ 故采用**相对基线**阈值，避免量纲踩坑。
+
+## 用法
+```
+./impact_detect [serial_dev] [baud] [thr_g] [acc_1g] [rate_hz]
+# 默认: /dev/ttyS0 230400 0.8 0(auto) 50
+# 例(灵敏度高的台架测试):
+./impact_detect /dev/ttyS0 230400 0.5
+```
+- 平时每秒打印 `|a| / baseline / max`；触发时打印 `*** IMPACT *** t=.. |a|=..g dev=..g (ax,ay,az)`。
+
+## 台架验证
+- 静止：`|a|=1.00g baseline=1.00g`（稳定）。
+- **用手/笔敲击飞控本体或旁边桌面** → 应出现 `*** IMPACT ***`。
+- （可选）用 USB 侧 `~/.../msp` 工具核对原始 `acc` 是否随运动变化。
+
+## 注意
+- 仅用工具链 + `msp.c`，**不依赖相机/中间件**；不占相机，可与别的程序并行（但 **ttyS0 与 loop_overlay 等互斥**，同一时刻只能用其一）。
+- 真机时下位机 INAV 原生 `crash_detection` 需关闭，避免与我们冲突（见 `AGENT_GUIDE`）。
+
+## 文件
+```
+├── impact_detect.c   # 主程序
+├── msp.c/h           # MSP(支持的数值波特率版, 复制自 15)
+├── Makefile          # 纯 C
+└── README.md
+```

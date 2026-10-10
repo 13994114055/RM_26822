@@ -21,6 +21,7 @@
 | 13 | 2026-09-30 | [2026-09-30_13_yolov8_quantize](./2026-09-30_13_yolov8_quantize/) | **YOLOv8n 量化全流程**（TDL 导出 6 分支 ONNX → TPU-MLIR INT8） | ✅ `yolov8n.onnx` → `yolov8n_cv181x_int8_sym.cvimodel`（3.4MB，占位预训练模型） | **完成**（4060 真模型到位只换 ONNX） |
 | 14 | 2026-10-10 | [2026-10-10_14_green_fly_smooth](./2026-10-10_14_green_fly_smooth/) | **闭环打磨**（08 闭环 + 偏移 EMA 低通 + 丢检滞回 + FC 遥测回读） | ✅ 台架跑通（真 FC `/dev/ttyS0` @230400）：漏检不回中、offset 平滑、`ATTITUDE/RAW_IMU` 双向回读 | **完成**（`kp`/roll-pitch 符号待实机标定） |
 | 15 | 2026-10-10 | [2026-10-10_15_closedloop_overlay](./2026-10-10_15_closedloop_overlay/) | **闭环可视化叠加**（RTSP 上叠加 检测框/offset/RC/FC姿态） | ✅ 台架跑通：RTSP 出图 + 文字/框叠加 + 双向 MSP；检测到绿目标出框+连线 | **完成**（fps≈6 待优化；kp 待实机） |
+| 16 | 2026-10-10 | [2026-10-10_16_impact_detect](./2026-10-10_16_impact_detect/) | **撞击检测**（`MSP_RAW_IMU` 加速度模长突增，相对基线） | ✅ 台架跑通：`\|a\|≈1g` 稳定、输入正常；敲击即触发 `*** IMPACT ***` | **完成**（待敲击实测） |
 
 ## 相关文档（上层）
 - `../README.md`（项目总览）、`../agent.md`（AI 上下文）
