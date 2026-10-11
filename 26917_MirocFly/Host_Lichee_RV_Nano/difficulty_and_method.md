@@ -155,7 +155,7 @@
   - 而 `SET_RAW_RC` 的**负载**顺序才是 AETR（`rcmap={0,1,3,2}` 换位，`payload[2]=throttle`）。
 - **后果**：`11`(0b1011) = 接管 roll/pitch/**throttle** 而放开 yaw → FC 用 payload 里那路油门(`1000`)**覆盖物理油门 → 空中切油砸机**。正解 = **`7`(0b0111)**。
 - **对比**：Betaflight 的 `msp_override_channels_mask` 位序是 **AETR**（`rx/msp_override.c` 里按 `rawChannel=rcmap[chan]` 索引，bit2=throttle）→ **两家不一致，切勿照搬**。
-- **解决**：FC `set msp_override_channels = 7` + `save`；上位机实验18 `probe` 模式回读 `MSP_ACTIVEBOXES`(bit41=BOXMSPRCOVERRIDE) 确认"真接管"，并用 `MSP_MOTOR`/`ATTITUDE` 定 roll/pitch 符号与 `kp`。
+- **解决**：FC `set msp_override_channels = 7` + `save`。**判"是否真接管"要回读 `MSP_RC`(105，返回 override 之后的通道)**：我们发 roll=1700 时若 FC 的 roll≈1700 → 接管生效。（**别用 `MSP_ACTIVEBOXES` 的 `bit41` 判**：INAV `packBoxModeFlags()` 按"下发顺序的索引"打包，非 box 枚举号，只有 `bit0=BOXARM` 恰好可靠。）再用 `MSP_MOTOR`/`MSP_ATTITUDE` 的"相对 neutral Δ"定 roll/pitch 符号与 `kp`。真机另需注意：油门须 > `min_check`(1100) 才出混控；ch8 须落 `[1700,2100)`。
 - **教训**：跨固件（BF/INAV）的"同名配置"必须回**运行的这份源码**核对，别信直觉/别信另一家的文档。
 
 ---

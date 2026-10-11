@@ -133,7 +133,7 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
 - serial 配置持久化 bug（根因 `MAX_MSP_PORT_COUNT=3`，解法清空 UART1）。
 - UART1/ttyS1 与 AIC8800 冲突诊断；释放 UART0 console。
 - ✅ **"离地即翻/自旋"根因（2026-10-10）**：**电机输出编号 M1–M4 与物理接线错位**（飞控倒装 180° 重装后未重映射）→ 姿态修正发给了错误电机 → 发散（翻/自旋）。**修复**：mixer 改成匹配真实编号的"180° 轮换"版 + `motor_direction_inverted=OFF` + `align_board_roll=1800`（倒装仅靠它补传感器朝向）。**现能起飞、不再自旋**。排查法见 §5.5；基线 dump：`drone/firmware/INAV_10.0.0_cli_20261010_dirfix.txt`。
-- ✅ **上位机操控下位机（2026-10-11, 实验18）**：上位机 `takeover`（HSV 绿目标→roll/pitch→`MSP_SET_RAW_RC`）经 `MSP RC Override` 接管。**纠正 `msp_override_channels` 位序坑**（见 §6）→ 改 `7` 并 `save`（`get msp_override_channels = 7` 已确认）。板端台架跑通（链路 + `MSP_MOTOR`/`MSP_ACTIVEBOXES` 回读）；真机（压重物/绑绳→短飞）待标定 kp/符号。
+- ✅ **上位机操控下位机（2026-10-11, 实验18）**：上位机 `takeover`（HSV 绿目标→roll/pitch→`MSP_SET_RAW_RC`）经 `MSP RC Override` 接管。**纠正 `msp_override_channels` 位序坑**（见 §6）→ 改 `7` 并 `save`（`get = 7` 已确认）。**台架验证通过**：接管生效（上位机用 `MSP_RC` 回读我方发送值吻合）、**油门未被覆盖**（mask=7）、**混控 Δ 与实测 `mmix` 一致**、符号自洽。实测：`mmix`=M1:+roll+pitch / M2:+roll-pitch / M3:-roll+pitch / M4:-roll-pitch；`align_board_roll=1800`、`motor_direction_inverted=OFF`、`min_check=1100`（油门需 >1100 才出混控）、AIRMODE 已启用。真机待标定 kp/符号（另有开放问题：水平误差 roll vs yaw，见上位机实验18）。
 
 ### 5.2 ✅ EzTune 关闭 + INAV 默认 PID（Plan A）
 - **背景**：INAV 的 **EzTune** 特性在开启时会**覆盖** `mc_p/i/d`（每次启动重算）；此前 `ez_enabled=ON`（`ez_response≈92`），导致 PID 不受手动配置控制。

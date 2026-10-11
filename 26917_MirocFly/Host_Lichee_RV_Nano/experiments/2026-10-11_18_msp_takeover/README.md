@@ -31,8 +31,23 @@ VI 帧 → NV21→BGR → resize(640×360) → BGR2HSV → inRange → 形态学
       → 最大轮廓 → offset(减 pitch_bias_px) → [EMA 平滑 + 丢检滞回]
       → msp_offset_to_rc(kp,max_delta) → SET_RAW_RC(AETR 负载, 16ch) → /dev/ttyS0 @230400
       → FC(MSP RC Override 模式 + msp_override_channels=7) 接管 roll/pitch/yaw
-      → 回读 ATTITUDE / RAW_IMU / MOTOR / ACTIVEBOXES
+      → 回读 ATTITUDE / RAW_IMU / MOTOR / MSP_RC / ACTIVEBOXES
 ```
+
+## 台架验证结果（2026-10-11，真 FC `/dev/ttyS0`，压重物固定）
+- ✅ **接管生效**：`probe` 发 roll±/pitch± 时 `MSP_RC` 回读与之吻合（日志 `OVERRIDE OK`，FCRC roll=1700 / pitch=1300…）。
+- ✅ **mask=7 语义正确**：接管期间 `MSP_RC` 的 throttle = **物理油门**（未被覆盖，正是要的"油门留飞行员"）。
+- ✅ **混控通路正确**：`roll+`→M1,M2 升 / M3,M4 降；`pitch+`(负指令)→M2,M4 升（与实测 `mmix` 完全一致）。
+- ✅ **符号约定自洽**：负 pitch 指令 → `attitude.pitch` 变负 = **低头**（INAV 用 NED，正 pitch=抬头；MSP 约定同）。对照 `msp_offset_to_rc`：目标偏右→正 roll（右滚）、目标偏下→负 pitch（低头）。
+- ⚠️ **油门必须 > `min_check`(=1100) 才出混控**（无 AIRMODE-active 的低油门会停混控，`getMotorStatus()`）；建议 ~1400。
+- ⚠️ **ch8 必须落在 `[1700,2100)`**（`aux 3 50 3 1700 2100`，**右端开区间**）；否则 `OVERRIDE` 不触发。
+- 实测 FC（`fccli` 只读）：`mmix` = M1:+roll+pitch / M2:+roll-pitch / M3:-roll+pitch / M4:-roll-pitch；`align_board_roll=1800`、`motor_direction_inverted=OFF`、`min_check=1100`、**AIRMODE 已启用**（`feature`）。
+
+## ⚠️ 开放问题：水平误差用 roll 还是 yaw？（**待讨论，暂未改**）
+`msp_offset_to_rc` 目前把 **水平误差 offsetX → roll**（沿用 08/14）。但"**机头前方固定相机 + 朝目标飞/撞**"的场景，水平居中更自然的是 **yaw**：
+- **yaw**：转到机头对准目标 → 目标留在画面中心 → 再靠 pitch/油门前冲（像"车把式"转向，适合撞击任务）。
+- **roll**：机身侧倾做**横向平移**，机头朝向**不变**、相机不指向目标，且画面随滚转倾斜 → 视觉闭环更别扭。
+- 若改为 **offsetX→yaw、offsetY→pitch（roll 回中）**：yaw 位在 `mask=7` 内、可被接管；需另行确认 yaw 指令正负（正 yaw=右转）。
 
 ## 用法
 ```
@@ -66,7 +81,8 @@ LD_LIBRARY_PATH=/mnt/system/usr/lib:/mnt/system/usr/lib/3rd \
 - ⚠️ 接管时务必 **ANGLE**；ACRO 下 roll/pitch 是角速度，会被"持续旋转"。
 
 ## 待办 / 后续
-- 用 `probe` 定死 roll/pitch 符号与 `kp`；相机换带 pitch 角模具后标 `pitch_bias_px`。
+- **先定"水平误差用 roll 还是 yaw"**（见上"开放问题"），再真机 `track`；定死 `kp`。
+- 验证相机安装是否**镜像/带俯仰角**（绿目标放右/下，看 `att r/p` 方向；换模具后标 `pitch_bias_px`）。
 - 把本"接管执行块"接回 17 的任务状态机（真实油门/起飞；`track` 作为 APPROACH 的执行器）。
 - 视觉改 YOLO（阶段 2）时，本层只需替换检测源，接管/链路不变。
 
