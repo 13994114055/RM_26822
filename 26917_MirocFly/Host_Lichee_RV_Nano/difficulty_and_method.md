@@ -148,6 +148,16 @@
   **解决**：用灯条**两条短边的中点**连成**中轴**，再取两灯条中轴端点四边形的**对角线交点**；合成集中心误差从 ~10px 降到 **0.34px**。
 - **教训**：几何量（长轴/中心）要按"物理意义"算，别用"数值最值"图省事；`boxPoints` 角点顺序不可依赖。
 
+### B17. MSP RC Override 掩码位序：INAV 是 AERT，不是 AETR（实验18）
+- **背景**：上位机（实验18 `takeover`）用 `MSP_SET_RAW_RC` 经下位机 INAV 的 `MSP RC Override` 接管；目标"只接管 roll/pitch/yaw，油门留飞行员"，本以为是 `msp_override_channels=11`（按 AETR：bit2=throttle）。
+- **根因**：逐行核对 `inav-g4dbg/src/main/rx/msp_override.c` + `rx.c` + `fc/rc_controls.h`：
+  - INAV 内部通道枚举 `ROLL=0 PITCH=1 YAW=2 THROTTLE=3`（`fc/rc_controls.h:25`）；掩码按**内部通道号**逐位比较（`channelMask = 1<<channel`，`msp_override.c:269`）。
+  - 而 `SET_RAW_RC` 的**负载**顺序才是 AETR（`rcmap={0,1,3,2}` 换位，`payload[2]=throttle`）。
+- **后果**：`11`(0b1011) = 接管 roll/pitch/**throttle** 而放开 yaw → FC 用 payload 里那路油门(`1000`)**覆盖物理油门 → 空中切油砸机**。正解 = **`7`(0b0111)**。
+- **对比**：Betaflight 的 `msp_override_channels_mask` 位序是 **AETR**（`rx/msp_override.c` 里按 `rawChannel=rcmap[chan]` 索引，bit2=throttle）→ **两家不一致，切勿照搬**。
+- **解决**：FC `set msp_override_channels = 7` + `save`；上位机实验18 `probe` 模式回读 `MSP_ACTIVEBOXES`(bit41=BOXMSPRCOVERRIDE) 确认"真接管"，并用 `MSP_MOTOR`/`ATTITUDE` 定 roll/pitch 符号与 `kp`。
+- **教训**：跨固件（BF/INAV）的"同名配置"必须回**运行的这份源码**核对，别信直觉/别信另一家的文档。
+
 ---
 
 ## C. 内存 / ION 认知（由困难衍生）

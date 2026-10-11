@@ -53,7 +53,7 @@ IDLE → ARM → TAKEOFF → SEEK(搜索目标) → APPROACH(接近撞击)
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | **0 相机出帧** | 交叉编译 + CSI 抓帧（CVI MMF） | 🟢 **打通**：`experiments/…/04_vision_module`（Form A）出真图；`05_rtsp_stream` 已能 RTSP 实时预览 |
-| **1 绿色荧光（过渡）** | HSV 检测 → 视觉→控制闭环（INAV 验证） | 🟡 **检测(06)+链路(07)已通，闭环程序(08)已写**；真机联调待下位机（G473）**对接/本土化** |
+| **1 绿色荧光（过渡）** | HSV 检测 → 视觉→控制闭环（INAV 验证） | 🟢 **台架全通**：检测(06)+链路(07)+打磨(14)+可视化(15)+撞击(16)+状态机干跑(17)+**操控下位机(18, MSP RC Override)**；真机标定 kp/符号待做 |
 | **2 不规则物体（最终）** | YOLOv8n → INT8 → NPU 部署 → 撞击 → 30s 返航 | 🟡 **部署(09/10)+量化(11)已通**；**自训装甲模型待 4060** |
 | **3 自写固件（远期）** | 下位机自研飞控 + 自定义帧，全栈闭环 | ⏳ 远期（新主控 G473 已重购、INAV G4 能飞，待与上位机对接） |
 
@@ -62,7 +62,7 @@ IDLE → ARM → TAKEOFF → SEEK(搜索目标) → APPROACH(接近撞击)
 ## 关键决策（已确认）
 
 - **通信协议**：近期 **MSP**（INAV 串口仅支持 MSP）；远期自定义帧 `0xAA 0x55 | X | Y | Area | Status | CRC8`。
-- **RC 优先接管**：INAV 的 `MSP RC Override` 模式（固件自带 `BOX_MSP_RC_OVERRIDE` + `msp_override_channels`，**需在 CLI 配置、默认不覆盖**），遥控器拨杆切换自主/手动，硬件级兜底。
+- **RC 优先接管**：INAV 的 `MSP RC Override` 模式（固件自带 `BOX_MSP_RC_OVERRIDE` + `msp_override_channels`，**需在 CLI 配置、默认不覆盖**），遥控器拨杆（ch8）切换自主/手动，硬件级兜底。**⚠️ 掩码位序 = 内部通道号 AERT**（`ROLL=0 PITCH=1 YAW=2 THROTTLE=3`，非负载 AETR）：只接管三轴、油门留飞行员 = **`7`**（`11` 会误接管油门→切油）。
 - **边缘 AI**：YOLOv8n → INT8 量化 → TDL SDK 部署 SG2002 NPU（同芯片实测 ~17–27 FPS），HSV 仅调试/兜底。
 - **相机方案**：**用 scpcom 镜像 + scpcom 中间件**（官方镜像 GC4653 中间件坏；相机硬件本身正常）。自写程序必须**用 scpcom 的公有头编译、链接板上 scpcom 的库**，**不可混用 sipeed/官方中间件**（混用会导致取帧全黑）。
 - **撞击检测**：近期上位机轮询 `MSP_RAW_IMU` 加速度突增；远期下位机 IMU 检测 + 状态机。
@@ -79,7 +79,7 @@ IDLE → ARM → TAKEOFF → SEEK(搜索目标) → APPROACH(接近撞击)
 
 - **已打通**：上位机镜像（scpcom）SSH 可登录；**相机链路全通**——板载 `test_mmf` 出真图，且**自写相机层 `experiments/2026-09-26_04_vision_module/`（Form A）出真图**、**`experiments/2026-09-26_05_rtsp_stream/` 打通 RTSP 实时预览**、**`experiments/2026-09-26_06_hsv_green/` 打通 HSV 绿色检测（输出 offset/area）**、**`experiments/2026-09-26_07_msp_link/` 打通 MSP 链路（PTY 模拟 FC 自测）**、**`experiments/2026-09-26_08_vision_control/` 写出"识别绿色并飞向"闭环程序**；**阶段 2 的 NPU 部署与量化通路已通**（`experiments/2026-09-26_09_npu_demo/`：底层 cviruntime + 高层 TDL，官方 YOLOv8n INT8 检测 17.6 FPS；`experiments/2026-09-27_10_tdl_infer/`：**可复用推理层 + 相机检测 + RTSP 叠加**；`experiments/2026-09-28_11_quantize/`：**TPU-MLIR 把 ONNX 量化成 cv181x INT8 cvimodel，板上 NPU 43.9 FPS**）；`experiments/2026-09-29_12_armor_led/`：**传统 CV 装甲板（红/蓝 LED 灯条）PC 原型**，合成集召回/精确 100%、中心误差 0.34px，不依赖训练）。已克隆 scpcom 源码树 `LicheeSG-Nano-Build_scpcom`；opencv-mobile/TDL 参考就绪。
 - **黑帧根因（已解）**：**两问题叠加**——① 中间件版本混用（链了 sipeed，须用 **scpcom 公有头 + 板上 scpcom 库**）；② 抓到**流水线启动首帧**（须先丢前导帧）。次要：① 输出文件自动清理（限制 SD 占用）；② 下位机主控更替已落地（G473 能飞、MSP 链路已通、**方向类问题已解决**）。进度见 `Low_MCU/README.md`。
-- **下一步**：① 无电池期间优先**上位机侧**（MSP 链路**台架联调** + 视觉闭环）；② NPU 检测接到**相机实时帧**（`09` 步骤3）；③ 装甲板方案（1 类检测 + HSV 判红蓝）；④ 自训/量化（用 N 卡笔记本，量化转换是门槛）；⑤ 有电池后：短悬停验证自稳 → 黑匣子定 PID → 视觉→控制真机闭环。
+- **下一步**：① **上位机操控下位机**（`experiments/2026-10-11_18_msp_takeover/`）——台架 `probe`（压重物/绑绳）定死 roll/pitch 符号与 `kp`，再真机 `track` 短飞（须 ANGLE + ch8 接管）；② NPU 检测接到**相机实时帧**（`09` 步骤3）；③ 装甲板方案（1 类检测 + HSV 判红蓝）；④ 自训/量化（用 N 卡笔记本，量化转换是门槛）；⑤ 短悬停验证自稳 → 黑匣子定 PID → 视觉→控制真机闭环。
 
 ## 文档导航
 

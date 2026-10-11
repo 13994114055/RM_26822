@@ -1,0 +1,6 @@
+takeover
+*.o
+*.raw
+*.bmp
+*.png
+*.jpg

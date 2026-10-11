@@ -121,7 +121,7 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
 - 要点：**UART1(ttyS1) 与板载 Wi-Fi/BT(AIC8800) 共用引脚，不可用**；**UART0 需先释放 console getty**（板内 `/etc/inittab` 注释相应行）。
 - ⚠️ **必须 `serial 0 0 ...` 清空 UART1**：INAV 限 **最多 3 个 MSP 端口**（`MAX_MSP_PORT_COUNT=3`）；默认 VCP+UART1 已占 2，再加 UART2+UART4 会超限 → 启动时 serial 配置被**整体重置**（表现为"存不住"）。
 - MTF-02P 走 **MSP**：`opflow_hardware=MSP` + `rangefinder_hardware=MSP`（INAV 原生解析 `MSP2_SENSOR_OPTIC_FLOW`/`MSP2_SENSOR_RANGEFINDER`）。
-- 策略：保留物理 CRSF；上位机 `MSP RC Override`（永久 ID 50）绑 ch8（`aux 0 50 3 1700 2100`），`msp_override_channels=15`；`failsafe_procedure=DROP`。
+- 策略：保留物理 CRSF；上位机 `MSP RC Override`（永久 ID 50）绑 ch8（`aux 3 50 3 1700 2100`），**`msp_override_channels=7`**（只接管 roll/pitch/yaw，油门留飞行员）。**⚠️ 掩码位序 = 内部通道号 AERT（`ROLL=0 PITCH=1 YAW=2 THROTTLE=3`），非负载 AETR；`11` 会误接管油门→切油**。`failsafe_procedure`：配置稿=DROP，**实测板载=LAND**（待统一）。
 
 ---
 
@@ -133,6 +133,7 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
 - serial 配置持久化 bug（根因 `MAX_MSP_PORT_COUNT=3`，解法清空 UART1）。
 - UART1/ttyS1 与 AIC8800 冲突诊断；释放 UART0 console。
 - ✅ **"离地即翻/自旋"根因（2026-10-10）**：**电机输出编号 M1–M4 与物理接线错位**（飞控倒装 180° 重装后未重映射）→ 姿态修正发给了错误电机 → 发散（翻/自旋）。**修复**：mixer 改成匹配真实编号的"180° 轮换"版 + `motor_direction_inverted=OFF` + `align_board_roll=1800`（倒装仅靠它补传感器朝向）。**现能起飞、不再自旋**。排查法见 §5.5；基线 dump：`drone/firmware/INAV_10.0.0_cli_20261010_dirfix.txt`。
+- ✅ **上位机操控下位机（2026-10-11, 实验18）**：上位机 `takeover`（HSV 绿目标→roll/pitch→`MSP_SET_RAW_RC`）经 `MSP RC Override` 接管。**纠正 `msp_override_channels` 位序坑**（见 §6）→ 改 `7` 并 `save`（`get msp_override_channels = 7` 已确认）。板端台架跑通（链路 + `MSP_MOTOR`/`MSP_ACTIVEBOXES` 回读）；真机（压重物/绑绳→短飞）待标定 kp/符号。
 
 ### 5.2 ✅ EzTune 关闭 + INAV 默认 PID（Plan A）
 - **背景**：INAV 的 **EzTune** 特性在开启时会**覆盖** `mc_p/i/d`（每次启动重算）；此前 `ez_enabled=ON`（`ez_response≈92`），导致 PID 不受手动配置控制。
@@ -199,6 +200,7 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
 15. **电压采样（自制 target）**：`target.h` 的 `VBAT_SCALE_DEFAULT` 曾误设 **110**（=1.1:1），本板实际分压为 **11:1** → 电压只显示 ~0.4V（1S 电池）。正确值 **1100**（2026-10-10 修正源码 + 板上 `set vbat_scale = 1100` 已 `save` 持久化，重启后 `status` 显示 ~4V）。**自制 target 首次上电务必核对 `vbat_scale`/`current_meter_scale`。**
 16. **板载无气压计 → `ALTHOLD`/`POSHOLD` 不可用**：INAV 的高度控制前提 `navReadyAltControl` **只认气压计或 GPS**（`fc_msp_box.c:232`），**光流/激光测距都不算**（测距只在"已有 baro"后用于表面跟随/加权）。`baro_hardware=AUTO` 若开机没检测到，会被自动写回 `NONE`（`sensors/initialisation.c:87`）。本板（BetaFPV Air G4/G473）官方页标注 `Baro: —`。**想无 GPS 用光流定点 → 需外接气压计（BMP280/DPS310 到 I2C1：PA15=SCL/PB7=SDA）**；否则跳过。
 17. **串口设 GPS 但无 GPS 模块 → 无效**；且**别动 UART2=上位机 MSP**（会破坏链路）。本板 UART 已排满（UART1 仅RX / UART2 上位机MSP / UART3 CRSF / UART4 光流MSP）。
+18. **`msp_override_channels` 位序 = AERT（内部通道号），不是 AETR**：INAV 内部 `ROLL=0 PITCH=1 YAW=2 THROTTLE=3`（`fc/rc_controls.h`），掩码 `1<<channel`（`rx/msp_override.c:269`）；而 `SET_RAW_RC` 的**负载**顺序才是 AETR（`rcmap={0,1,3,2}`）。故"只接管三轴、油门留飞行员"= **`7`(0111)**；**`11`(1011) 会接管 roll/pitch/throttle 而放开 yaw → payload 油门(1000) 覆盖物理油门 → 空中切油**。Betaflight 掩码则是 AETR（bit2=throttle），**两家不一致，别照搬**。可用上位机实验18 `probe`/`MSP_ACTIVEBOXES`(bit41) 确认是否真接管。
 
 ---
 
