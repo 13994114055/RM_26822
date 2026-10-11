@@ -56,6 +56,7 @@ extern "C" {
 static volatile int g_exit = 0;
 static void on_sig(int s) { (void)s; g_exit = 1; }
 static int g_dry = 0;   /* dry: 只检测+算 RC(打印), 不发 SET_RAW_RC; 静态验证相机/符号用 */
+static double g_secs = 0;   /* >0: 运行 N 秒后干净退出(预启动/脱离电脑测试用) */
 
 static const int DET_W = 640;
 static const int DET_H = 360;
@@ -212,8 +213,10 @@ static int run_probe(int fd, int step, int frames)
 	tele t; memset(&t, 0, sizeof(t));
 	double acc[4] = {0, 0, 0, 0}; long accn = 0;   /* 每相位电机累加, 切换时打小结 */
 	double neutral_avg[4] = {0, 0, 0, 0}; int have_neutral = 0;
+	double t_run0 = now_s();
 
 	while (!g_exit) {
+		if (g_secs > 0 && now_s() - t_run0 >= g_secs) break;
 		double now = now_s();
 		if (now - t_phase >= dwell) {
 			if (accn > 0) {
@@ -288,8 +291,10 @@ static int run_track(int fd, int req_w, int req_h, int frames,
 	bool tracking = false;
 	int lost = 0, found_cnt = 0, sent = 0, seq = 0;
 	tele t; memset(&t, 0, sizeof(t));
+	double t_run0 = now_s();
 
 	while (!g_exit) {
+		if (g_secs > 0 && now_s() - t_run0 >= g_secs) break;
 		mf_frame_t f;
 		if (mf_camera_get_frame(&f, 5000) != 0) break;
 		int w = f.width, h = f.height;
@@ -395,10 +400,11 @@ int main(int argc, char *argv[])
 	{ const char *s = getenv("MIROCFLY_SERIAL"); if (s) serial_dev = s; }
 	{ const char *b = getenv("MIROCFLY_BAUD"); if (b) baud = atoi(b); }
 	{ const char *d = getenv("MIROCFLY_DRY"); if (d && atoi(d)) g_dry = 1; }
+	{ const char *s = getenv("MIROCFLY_SECS"); if (s) g_secs = atof(s); }
 
 	printf("=== MirocFly exp18 msp_takeover (mode=%s%s) ===\n", mode, g_dry ? ",DRY" : "");
-	printf("cam %dx%d frames=%d out=%s baud=%d kp=%.2f bias=%d%s\n",
-	       req_w, req_h, frames, serial_dev ? serial_dev : "PTY(mock FC)", baud, kp, pitch_bias_px,
+	printf("cam %dx%d frames=%d out=%s baud=%d kp=%.2f bias=%d secs=%.0f%s\n",
+	       req_w, req_h, frames, serial_dev ? serial_dev : "PTY(mock FC)", baud, kp, pitch_bias_px, g_secs,
 	       g_dry ? "  [DRY: 不发 SET_RAW_RC]" : "");
 
 	/* ---- 链路 ---- */
