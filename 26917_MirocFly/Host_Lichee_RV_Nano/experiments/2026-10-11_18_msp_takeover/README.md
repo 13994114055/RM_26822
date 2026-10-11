@@ -39,6 +39,8 @@ VI 帧 → NV21→BGR → resize(640×360) → BGR2HSV → inRange → 形态学
 - ✅ **mask=7 语义正确**：接管期间 `MSP_RC` 的 throttle = **物理油门**（未被覆盖，正是要的"油门留飞行员"）。
 - ✅ **混控通路正确**：`roll+`→M1,M2 升 / M3,M4 降；`pitch+`(负指令)→M2,M4 升（与实测 `mmix` 完全一致）。
 - ✅ **符号约定自洽**：负 pitch 指令 → `attitude.pitch` 变负 = **低头**（INAV 用 NED，正 pitch=抬头；MSP 约定同）。对照 `msp_offset_to_rc`：目标偏右→正 roll（右滚）、目标偏下→负 pitch（低头）。
+- ✅ **静态视觉标定（`dry` 模式，2026-10-11）**：目标在**画面左** → `off.x<0`、`roll<1500`（左滚）；目标在**画面上** → `off.y<0`、`pitch>1500`（抬头）；无目标 → `LOST`、RC 回中。→ **相机不镜像、视觉→指令符号全部正确，`msp.c` 无需改符号**。
+- ⚠️ **ION 泄漏（实测）**：日志出现 `vi_sdk_enable_chn NG, Out of memory`（`cvi_carveout` used ≈79/105MB，残 `VI_DMA_BUF`）→ VI 使能失败、卡在 `camera ready`。**相机程序必须 `killall`(SIGTERM) 退出**（`kill -9` 泄漏）；泄漏后**重启板子**回收。
 - ⚠️ **油门必须 > `min_check`(=1100) 才出混控**（无 AIRMODE-active 的低油门会停混控，`getMotorStatus()`）；建议 ~1400。
 - ⚠️ **ch8 必须落在 `[1700,2100)`**（`aux 3 50 3 1700 2100`，**右端开区间**）；否则 `OVERRIDE` 不触发。
 - 实测 FC（`fccli` 只读）：`mmix` = M1:+roll+pitch / M2:+roll-pitch / M3:-roll+pitch / M4:-roll-pitch；`align_board_roll=1800`、`motor_direction_inverted=OFF`、`min_check=1100`、**AIRMODE 已启用**（`feature`）。
@@ -61,7 +63,7 @@ VI 帧 → NV21→BGR → resize(640×360) → BGR2HSV → inRange → 形态学
 ## 用法
 ```
 ./takeover [mode] [w] [h] [frames] [serial_dev] [baud] [pitch_bias_px] [kp]
-# mode = track | probe（默认 track）
+# mode = track | probe | dry（默认 track；dry = track 但不发 RC，静态标定用）
 # 省略 serial_dev → 内部 PTY 假 FC（无需硬件可跑全链路）
 # 真 FC：
 LD_LIBRARY_PATH=/mnt/system/usr/lib:/mnt/system/usr/lib/3rd \
@@ -69,6 +71,9 @@ LD_LIBRARY_PATH=/mnt/system/usr/lib:/mnt/system/usr/lib/3rd \
 # 台架方向自检（无需相机，压重物/绑绳）：
 LD_LIBRARY_PATH=/mnt/system/usr/lib:/mnt/system/usr/lib/3rd \
   ./takeover probe 0 0 0 /dev/ttyS0 230400
+# 静态视觉标定（只检测+算 RC 并打印, 不发 SET_RAW_RC; 挪绿目标看 off->RC 符号）：
+LD_LIBRARY_PATH=/mnt/system/usr/lib:/mnt/system/usr/lib/3rd \
+  ./takeover dry 1280 720 0
 ```
 - env：`MIROCFLY_KP` / `MIROCFLY_ALPHA` / `MIROCFLY_HOLD` / `MIROCFLY_SERIAL` / `MIROCFLY_BAUD`。
 
@@ -91,7 +96,7 @@ LD_LIBRARY_PATH=/mnt/system/usr/lib:/mnt/system/usr/lib/3rd \
 
 ## 待办 / 后续
 - **先定"水平误差用 roll 还是 yaw"**（见上"开放问题"），再真机 `track`；定死 `kp`。
-- 验证相机安装是否**镜像/带俯仰角**（绿目标放右/下，看 `att r/p` 方向；换模具后标 `pitch_bias_px`）。
+- ✅ 相机**已验不镜像**（静态标定）；仅剩：换带俯仰角模具后标 `pitch_bias_px`。
 - 把本"接管执行块"接回 17 的任务状态机（真实油门/起飞；`track` 作为 APPROACH 的执行器）。
 - 视觉改 YOLO（阶段 2）时，本层只需替换检测源，接管/链路不变。
 
