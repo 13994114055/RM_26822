@@ -94,6 +94,13 @@ LD_LIBRARY_PATH=/mnt/system/usr/lib:/mnt/system/usr/lib/3rd \
 - 接管窗口由 **ch8** 决定（`aux 3 50 3 1700 2100`），飞行员随时可回收控制权（硬件兜底）。
 - ⚠️ 接管时务必 **ANGLE**；ACRO 下 roll/pitch 是角速度，会被"持续旋转"。
 
+## 预启动（脱离电脑测试）
+程序支持 `MIROCFLY_SECS`：运行 N 秒后**干净退出**（自动 `close` 相机 → 不泄漏 ION）。板上脚本（自包含、已部署到 `/root/mirocfly/`）：
+- `./run_takeover.sh [secs=60] [kp=0.5] [bias=0] [mode=track]`：`nohup` 后台跑，日志写 `/root/mirocfly/takeover_<时间>.log`，记录路径到 `last_log.txt`，到点自停。
+- `./stop_takeover.sh`：SIGTERM 停止（**别 `kill -9`**）。
+- 流程：ssh 启动并确认在跑 → **拔 USB** → 遥控器 ARM/ANGLE/油门/ch8 接管 → 到点自动停 → 插回 USB 读日志。
+- ⚠️ **前提**：拔 USB 后 **LicheeRV 仍要有电**（无人机电池供电），否则中途断电 → 相机异常退出 → ION 泄漏、需重启板子。
+
 ## 待办 / 后续
 - **先定"水平误差用 roll 还是 yaw"**（见上"开放问题"），再真机 `track`；定死 `kp`。
 - ✅ 相机**已验不镜像**（静态标定）；仅剩：换带俯仰角模具后标 `pitch_bias_px`。
