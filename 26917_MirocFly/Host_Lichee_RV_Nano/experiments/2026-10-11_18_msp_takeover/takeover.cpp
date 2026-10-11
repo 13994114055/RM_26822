@@ -59,9 +59,10 @@ static void on_sig(int s) { (void)s; g_exit = 1; }
 static const int DET_W = 640;
 static const int DET_H = 360;
 
-/* INAV box 位定义(见下位机 fc/rc_modes.h) */
+/* INAV box: activeBoxIds[0]=BOXARM -> MSP box 掩码 bit0 = 已解锁(可靠)。
+ * 其余 box 位按"下发顺序"打包(fc_msp_box.c packBoxModeFlags), 非枚举号, 
+ * 故 OVERRIDE 判据改用 MSP_RC 与发送值对比(见 override_match)。 */
 static const int BOX_ARM = 0;
-static const int BOX_MSP_RC_OVERRIDE = 41;
 
 static double now_s(void) {
 	struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -93,11 +94,28 @@ struct tele {
 	int att_r, att_p, att_y;   /* deg*10 */
 	int ax, ay, az;
 	uint16_t mot[8];
+	int rc_r, rc_p, rc_y, rc_t; /* FC 实际在用通道(MSP_RC, override 之后), 内部序 */
 	int armed;
-	int override_active;
-	int got_att, got_motor, got_box;
+	int got_att, got_motor, got_rc, got_box;
 };
 static msp_parser_t g_rx;
+
+/* 本轮我们发给 FC 的 roll/pitch(用于对比 MSP_RC 判定是否真接管) */
+static int g_sent_roll = 1500, g_sent_pitch = 1500;
+
+/* 接管判定: FC 的 roll/pitch(MSP_RC) 与我们发送值接近 -> 接管生效。
+ * 返回 1=接管, 0=物理RC, -1=无数据, -2=我们发的是中位(与物理中位不可区分)。
+ * 比 ACTIVEBOXES 位掩码可靠(掩码按"下发顺序"打包, 非 box 枚举号)。 */
+static int override_match(const tele *t)
+{
+	if (!t->got_rc) return -1;
+	int sr = g_sent_roll - 1500; if (sr < 0) sr = -sr;
+	int sp = g_sent_pitch - 1500; if (sp < 0) sp = -sp;
+	if (sr <= 50 && sp <= 50) return -2;      /* 中性 -> 无法判定 */
+	int dr = t->rc_r - g_sent_roll; if (dr < 0) dr = -dr;
+	int dp = t->rc_p - g_sent_pitch; if (dp < 0) dp = -dp;
+	return (dr <= 40 && dp <= 40) ? 1 : 0;
+}
 
 /* 读一轮 FC 遥测(非阻塞, 阻塞 <=timeout_ms)。返回收到的帧数 */
 static int tele_poll(int fd, tele *t, int timeout_ms)
@@ -105,6 +123,7 @@ static int tele_poll(int fd, tele *t, int timeout_ms)
 	msp_send_request(fd, MSP_ATTITUDE);
 	msp_send_request(fd, MSP_RAW_IMU);
 	msp_send_request(fd, MSP_MOTOR);
+	msp_send_request(fd, MSP_RC);
 	msp_send_request(fd, MSP_ACTIVEBOXES);
 
 	fd_set rf; FD_ZERO(&rf); FD_SET(fd, &rf);
@@ -130,14 +149,17 @@ static int tele_poll(int fd, tele *t, int timeout_ms)
 				for (int k = 0; k < nmot; k++)
 					t->mot[k] = (uint16_t)(pl[2 * k] | (pl[2 * k + 1] << 8));
 				t->got_motor = 1;
-			} else if (cmd == MSP_ACTIVEBOXES && len >= 6) {
-				/* 小端 uint32 位数组: box n -> word[n/32], bit n%32 */
-				uint32_t words[4] = {0, 0, 0, 0};
-				int nw = len / 4; if (nw > 4) nw = 4;
-				for (int w = 0; w < nw; w++)
-					words[w] = (uint32_t)(pl[4*w] | (pl[4*w+1]<<8) | (pl[4*w+2]<<16) | (pl[4*w+3]<<24));
-				t->armed = (words[BOX_ARM / 32] >> (BOX_ARM % 32)) & 1;
-				t->override_active = (words[BOX_MSP_RC_OVERRIDE / 32] >> (BOX_MSP_RC_OVERRIDE % 32)) & 1;
+			} else if (cmd == MSP_RC && len >= 8) {
+				t->rc_r = (int16_t)(pl[0] | (pl[1] << 8));
+				t->rc_p = (int16_t)(pl[2] | (pl[3] << 8));
+				t->rc_y = (int16_t)(pl[4] | (pl[5] << 8));
+				t->rc_t = (int16_t)(pl[6] | (pl[7] << 8));
+				t->got_rc = 1;
+			} else if (cmd == MSP_ACTIVEBOXES && len >= 4) {
+				/* bit0 = activeBoxIds[0] = BOXARM(恰好第一个, 可靠); 其余位按"下发顺序", 
+				 * 不按 box 枚举号, 故不作为 override 判据(改用 MSP_RC 对比)。 */
+				uint32_t w0 = (uint32_t)(pl[0] | (pl[1] << 8) | (pl[2] << 16) | (pl[3] << 24));
+				t->armed = w0 & 1u;   /* BOXARM */
 				t->got_box = 1;
 			}
 		}
@@ -168,7 +190,8 @@ static int run_probe(int fd, int step, int frames)
 {
 	printf("=== probe: 台架方向自检 (油门/模式/拨杆由飞行员给) ===\n");
 	printf("前提: 拔桨 或 压重物/绑绳; 飞行员 ARM + ANGLE(ch6低位) + 油门略启 + ch8 抬起(>1700)\n");
-	printf("手柄步进=%d; 观察 电机输出 + 姿态变化 + OVERRIDE 是否 ACTIVE\n\n", step);
+	printf("手柄步进=%d; 判据: FCRC(FC实际通道) 与 cmd 一致 -> OVERRIDE OK\n", step);
+	printf("⚠️ 油门要给到中小以上(建议 ~1400-1500): 无 AIRMODE 时低油门会停混控 -> 电机不动\n\n");
 
 	struct { const char *name; int roll; int pitch; } seq[] = {
 		{"neutral", 1500,           1500},
@@ -186,20 +209,53 @@ static int run_probe(int fd, int step, int frames)
 	double t_phase = now_s(), t_log = 0;
 
 	tele t; memset(&t, 0, sizeof(t));
+	double acc[4] = {0, 0, 0, 0}; long accn = 0;   /* 每相位电机累加, 切换时打小结 */
+	double neutral_avg[4] = {0, 0, 0, 0}; int have_neutral = 0;
+
 	while (!g_exit) {
 		double now = now_s();
-		if (now - t_phase >= dwell) { t_phase = now; idx = (idx + 1) % nseq; iter++; }
+		if (now - t_phase >= dwell) {
+			if (accn > 0) {
+				double avg[4];
+				for (int k = 0; k < 4; k++) avg[k] = acc[k] / accn;
+				printf("   >> PHASE %-8s avg mot=[%.0f %.0f %.0f %.0f]",
+				       seq[idx].name, avg[0], avg[1], avg[2], avg[3]);
+				if (strcmp(seq[idx].name, "neutral") == 0) {
+					for (int k = 0; k < 4; k++) neutral_avg[k] = avg[k];
+					have_neutral = 1;
+					printf("  (baseline)\n");
+				} else if (have_neutral) {
+					printf("  dvs neutral=[%+.0f %+.0f %+.0f %+.0f] up:",
+					       avg[0]-neutral_avg[0], avg[1]-neutral_avg[1],
+					       avg[2]-neutral_avg[2], avg[3]-neutral_avg[3]);
+					for (int k = 0; k < 4; k++)
+						if (avg[k] - neutral_avg[k] > 20) printf(" M%d", k + 1);
+					printf("  down:");
+					for (int k = 0; k < 4; k++)
+						if (avg[k] - neutral_avg[k] < -20) printf(" M%d", k + 1);
+					printf("\n");
+				} else printf("  (no baseline yet)\n");
+			}
+			for (int k = 0; k < 4; k++) { acc[k] = 0; }
+			accn = 0;
+			t_phase = now; idx = (idx + 1) % nseq; iter++;
+		}
 
+		g_sent_roll = seq[idx].roll; g_sent_pitch = seq[idx].pitch;
 		send_rc(fd, seq[idx].roll, seq[idx].pitch, 1500, 1000);
 		sent++;
 
 		int fr = tele_poll(fd, &t, 6);
+		if (t.got_motor) { for (int k = 0; k < 4; k++) acc[k] += t.mot[k]; accn++; }
 
 		if (now - t_log >= 0.15) {
 			t_log = now;
-			printf("[%5.1fs] %-8s cmd(roll=%4d pitch=%4d) | %s | att r=%6.1f p=%6.1f | mot=[%4u %4u %4u %4u] | tiles=%d\n",
-			       now - t_phase + 0, seq[idx].name, seq[idx].roll, seq[idx].pitch,
-			       t.got_box ? (t.override_active ? "OVERRIDE ACTIVE" : (t.armed ? "ARMED/STANDBY" : "not-armed/no-override")) : "no-box",
+			int ov = override_match(&t);
+			const char *ovs = (ov == -1) ? "rc?" : (ov == -2 ? "neutral(n/a)" :
+			                  (ov ? "OVERRIDE OK" : (t.armed ? "ARMED/物理RC" : "not-armed/物理RC")));
+			printf("[%5.1fs] %-8s cmd(r=%4d p=%4d) | %-14s | FCRC r=%4d p=%4d y=%4d t=%4d | att r=%6.1f p=%6.1f | mot=[%4u %4u %4u %4u] | tiles=%d\n",
+			       now - t_phase, seq[idx].name, seq[idx].roll, seq[idx].pitch, ovs,
+			       t.got_rc ? t.rc_r : 0, t.got_rc ? t.rc_p : 0, t.got_rc ? t.rc_y : 0, t.got_rc ? t.rc_t : 0,
 			       t.att_r / 10.0, t.att_p / 10.0,
 			       t.mot[0], t.mot[1], t.mot[2], t.mot[3], fr);
 		}
@@ -285,17 +341,21 @@ static int run_track(int fd, int req_w, int req_h, int frames,
 			msp_offset_to_rc((int)sx, eff_y, w, h, kp, max_delta, rc);
 			roll = rc[0]; pitch = rc[1];
 		}
+		g_sent_roll = roll; g_sent_pitch = pitch;
 		send_rc(fd, roll, pitch, yaw, 1000);
 		sent++;
 
 		tele_poll(fd, &t, 6);
 
-		if (seq % 10 == 0)
-			printf("seq=%d %-5s off=(%d,%d) sm=(%d,%d) -> RC roll=%d pitch=%d | %s | FC att r=%6.1f p=%6.1f\n",
+		if (seq % 10 == 0) {
+			int ov = override_match(&t);
+			const char *ovs = (ov == -1) ? "rc?" : (ov == -2 ? "neutral" :
+			                  (ov ? "OVERRIDE" : (t.armed ? "物理RC" : "not-armed")));
+			printf("seq=%d %-5s off=(%d,%d) sm=(%d,%d) -> RC roll=%d pitch=%d | %-9s | FC att r=%6.1f p=%6.1f\n",
 			       seq, found ? "TRACK" : (send_target ? "HOLD" : "LOST"),
-			       offx, offy, (int)sx, (int)sy, roll, pitch,
-			       t.got_box ? (t.override_active ? "OVERRIDE" : "standby(no-ch8?)") : "?",
+			       offx, offy, (int)sx, (int)sy, roll, pitch, ovs,
 			       t.att_r / 10.0, t.att_p / 10.0);
+		}
 
 		seq++;
 		if (frames > 0 && seq >= frames) break;
