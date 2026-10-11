@@ -55,6 +55,7 @@ extern "C" {
 
 static volatile int g_exit = 0;
 static void on_sig(int s) { (void)s; g_exit = 1; }
+static int g_dry = 0;   /* dry: 只检测+算 RC(打印), 不发 SET_RAW_RC; 静态验证相机/符号用 */
 
 static const int DET_W = 640;
 static const int DET_H = 360;
@@ -280,8 +281,8 @@ static int run_track(int fd, int req_w, int req_h, int frames,
 	cfg.width = req_w; cfg.height = req_h;
 	if (mf_camera_open(&cfg) != 0) { fprintf(stderr, "camera open failed\n"); return -1; }
 	mf_camera_warmup(10);
-	printf("camera ready, sensor 0x%x (kp=%.2f bias=%d)\n",
-	       mf_camera_sensor_id(), kp, pitch_bias_px);
+	printf("camera ready, sensor 0x%x (kp=%.2f bias=%d%s)\n",
+	       mf_camera_sensor_id(), kp, pitch_bias_px, g_dry ? " DRY:不发RC" : "");
 
 	double sx = 0, sy = 0;
 	bool tracking = false;
@@ -312,13 +313,14 @@ static int run_track(int fd, int req_w, int req_h, int frames,
 			if (a >= min_area && a > best_a) { best_a = a; best = (int)i; }
 		}
 
-		bool found = false; int offx = 0, offy = 0;
+		bool found = false; int offx = 0, offy = 0; double area = 0;
 		if (best >= 0) {
 			cv::Moments m = cv::moments(contours[best]);
 			if (m.m00 > 0) {
 				double kx = (double)w / DET_W, ky = (double)h / DET_H;
 				offx = (int)((m.m10 / m.m00 - DET_W / 2.0) * kx);
 				offy = (int)((m.m01 / m.m00 - DET_H / 2.0) * ky);
+				area = best_a;
 				found = true;
 			}
 		}
@@ -342,7 +344,7 @@ static int run_track(int fd, int req_w, int req_h, int frames,
 			roll = rc[0]; pitch = rc[1];
 		}
 		g_sent_roll = roll; g_sent_pitch = pitch;
-		send_rc(fd, roll, pitch, yaw, 1000);
+		if (!g_dry) { send_rc(fd, roll, pitch, yaw, 1000); }
 		sent++;
 
 		tele_poll(fd, &t, 6);
@@ -351,9 +353,9 @@ static int run_track(int fd, int req_w, int req_h, int frames,
 			int ov = override_match(&t);
 			const char *ovs = (ov == -1) ? "rc?" : (ov == -2 ? "neutral" :
 			                  (ov ? "OVERRIDE" : (t.armed ? "物理RC" : "not-armed")));
-			printf("seq=%d %-5s off=(%d,%d) sm=(%d,%d) -> RC roll=%d pitch=%d | %-9s | FC att r=%6.1f p=%6.1f\n",
+			printf("seq=%d %-5s off=(%d,%d) sm=(%d,%d) area=%.0f -> %sroll=%d pitch=%d | %-9s | FC att r=%6.1f p=%6.1f\n",
 			       seq, found ? "TRACK" : (send_target ? "HOLD" : "LOST"),
-			       offx, offy, (int)sx, (int)sy, roll, pitch, ovs,
+			       offx, offy, (int)sx, (int)sy, area, g_dry ? "[would-be] " : "", roll, pitch, ovs,
 			       t.att_r / 10.0, t.att_p / 10.0);
 		}
 
@@ -382,6 +384,7 @@ int main(int argc, char *argv[])
 	signal(SIGTERM, on_sig);
 
 	if (argc > 1) mode = argv[1];
+	if (strcmp(mode, "dry") == 0 || strcmp(mode, "track-dry") == 0) { g_dry = 1; mode = "track"; }
 	if (argc > 2) req_w = atoi(argv[2]);
 	if (argc > 3) req_h = atoi(argv[3]);
 	if (argc > 4) frames = atoi(argv[4]);
@@ -391,10 +394,12 @@ int main(int argc, char *argv[])
 	if (argc > 8) kp = atof(argv[8]);
 	{ const char *s = getenv("MIROCFLY_SERIAL"); if (s) serial_dev = s; }
 	{ const char *b = getenv("MIROCFLY_BAUD"); if (b) baud = atoi(b); }
+	{ const char *d = getenv("MIROCFLY_DRY"); if (d && atoi(d)) g_dry = 1; }
 
-	printf("=== MirocFly exp18 msp_takeover (mode=%s) ===\n", mode);
-	printf("cam %dx%d frames=%d out=%s baud=%d kp=%.2f bias=%d\n",
-	       req_w, req_h, frames, serial_dev ? serial_dev : "PTY(mock FC)", baud, kp, pitch_bias_px);
+	printf("=== MirocFly exp18 msp_takeover (mode=%s%s) ===\n", mode, g_dry ? ",DRY" : "");
+	printf("cam %dx%d frames=%d out=%s baud=%d kp=%.2f bias=%d%s\n",
+	       req_w, req_h, frames, serial_dev ? serial_dev : "PTY(mock FC)", baud, kp, pitch_bias_px,
+	       g_dry ? "  [DRY: 不发 SET_RAW_RC]" : "");
 
 	/* ---- 链路 ---- */
 	int fd = -1; pthread_t fc_tid = 0;
