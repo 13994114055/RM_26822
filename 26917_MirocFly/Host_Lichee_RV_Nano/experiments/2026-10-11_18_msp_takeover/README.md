@@ -5,8 +5,10 @@
 
 > 与 14/17 的关系：14 是"检测→平滑→注入"的台架闭环，17 是"任务状态机干跑"。
 > 18 聚焦**执行/接管这一件事**，并补齐两样关键：
-> ① 明确的**接管语义 + 是否真接管的可观测**（`MSP_ACTIVEBOXES` 读 `BOXMSPRCOVERRIDE`）；
-> ② **方向自检 `probe`**（脚本化发 roll±/pitch±，读 `MSP_MOTOR`/`MSP_ATTITUDE`，定符号/kp）。
+> ① 明确的**接管语义 + 是否真接管的可观测**——**用 `MSP_RC`(105) 回读 FC 实际在用通道**与发送值对比（比 `MSP_ACTIVEBOXES` 可靠，见下）；
+> ② **方向自检 `probe`**（脚本化发 roll±/pitch±，读 `MSP_MOTOR`/`MSP_ATTITUDE`/`MSP_RC`，按"相对 neutral 的 Δ"定符号/kp）。
+
+> ⚠️ **`MSP_ACTIVEBOXES` 位序坑**：INAV `packBoxModeFlags()`（`fc_msp_box.c`）按**下发顺序的索引**打包（`bitArraySet(..., i)`，`i` = `activeBoxIds[]` 下标），**不是 box 枚举号**。所以 `bit41=BOXMSPRCOVERRIDE` 是错的（只有 `bit0=BOXARM` 恰好第 0 个可靠）。本实验改用 `MSP_RC`(105，返回 override **之后**的通道) 判接管：**我们发 roll=1700 时若 FCRC roll≈1700 → 接管生效**。
 
 ## ⚠️ 关键纠正：INAV `msp_override_channels` 位序 = AERT（不是 AETR）
 逐行核对本固件 `inav-g4dbg/src/main/rx/msp_override.c` + `rx.c` + `fc/rc_controls.h`：
@@ -49,10 +51,11 @@ LD_LIBRARY_PATH=/mnt/system/usr/lib:/mnt/system/usr/lib/3rd \
 ## 真机联调步骤（渐进）
 1. **FC 侧**：`set msp_override_channels = 7` + `save`（已由本实验写入 `drone/config/g473_msprc.txt`）。
 2. **台架 `probe`**（拔桨 **或** 压重物/绑绳）：
-   - 飞行员：ARM + **ANGLE 模式**（ch6 低位，否则 roll/pitch 是角速度→自旋）+ 油门略启 + **ch8 抬起(>1700)**。
+   - 飞行员：ARM + **ANGLE 模式**（ch6 低位，否则 roll/pitch 是角速度→自旋）+ **油门给到 `min_check`(1100) 以上（建议 ~1400）** + **ch8 抬起(>1700，全程保持)**。
    - 上位机跑 `probe` → 看日志：
-     - `OVERRIDE ACTIVE`：确认真接管（`MSP_ACTIVEBOXES` bit41）；
-     - 各相位 `mot=[...]` 的差值方向 → 定 **roll/pitch 符号**；调 `kp`。
+     - **`OVERRIDE OK`**：接管生效（判据 = `MSP_RC` 回读的 roll/pitch 与我们发送值一致）；
+     - 相位末 `>> PHASE ... dvs neutral=[...]`（相对 neutral 的 Δ）→ 定 **roll/pitch 符号**；调 `kp`。
+     - FC mixer：`roll+` 期望 M1,M2 升；`pitch+` 期望 M1,M3 升。
 3. **短飞 `track`**：绿目标进画面 → 飞机应朝目标**转/平飞**；不对就改 `msp_offset_to_rc` 的符号（一处一处改）。
 4. 退出用 **SIGTERM**（`killall takeover`），别 `kill -9`（ION 泄漏）；相机程序互斥。
 
@@ -72,7 +75,7 @@ LD_LIBRARY_PATH=/mnt/system/usr/lib:/mnt/system/usr/lib/3rd \
 ├── takeover.cpp     # 主程序: track(HSV→roll/pitch→SET_RAW_RC) + probe(方向自检)
 ├── camera.c/h       # 相机层(复制自 04/14/17)
 ├── sophgo_middleware.h
-├── msp.c/h          # MSP(复制自 14/17; 本实验加 MSP_MOTOR/MSP_ACTIVEBOXES)
+├── msp.c/h          # MSP(复制自 14/17; 本实验加 MSP_MOTOR/MSP_RC/MSP_ACTIVEBOXES)
 ├── Makefile         # 目标 takeover
 └── README.md
 ```
