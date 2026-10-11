@@ -74,7 +74,7 @@ LicheeRV Nano (SG2002) 上位机 —— Linux视觉层: 采集→识别→目标
 - `experiments/2026-09-29_12_armor_led/`（🟡传统CV装甲板 S0+S1）：**并行兜底/预研**，不依赖训练。S0 纯 PIL + 自解单应生成**透视梯形**合成图 21 张（含真值 `labels.csv`）；S1 `pc_tune/detect_armor.py`（**cv2**，PC venv 装 `opencv-python 5.0.0` 与板端 opencv-mobile 5.0.0 对齐）：通道差→形态学→minAreaRect→同色**松弛配对**→**四点四边形中心**，合成集**召回/精确 100%、中心误差 0.34px**。坑见 B16（灯条长轴取错对角线；中心受 boxPoints 内外边影响）。S2 板端移植待做。
 - 面试复盘文档 `Host_Lichee_RV_Nano/interview_notes.md`（按项目阶段组织的 Q&A）；知识点速查 `edge_ai_cheatsheet.md`。
 - **闭环系列（台架，2026-10-10）**：`14_green_fly_smooth`（EMA 平滑+丢检滞回+FC 遥测回读）、`15_closedloop_overlay`（RTSP 上叠加 检测框/offset/RC/FC姿态）、`16_impact_detect`（`RAW_IMU` 加速度突增撞击，敲击实测峰值 5.35g）、`17_task_state_machine`（干跑状态机 IDLE→…→DONE，视觉/IMU 撞击，**相机 pitch 偏置参数**）。
-- **`experiments/2026-10-11_18_msp_takeover/`（🟡上位机操控下位机）**：`takeover` 两模式——`track`（HSV 绿目标→EMA/滞回→roll/pitch→`SET_RAW_RC`，经 FC `MSP RC Override` 接管）+ `probe`（方向自检：发 roll±/pitch±，回读 `MSP_MOTOR`/`ATTITUDE`/`ACTIVEBOXES` 定符号/kp/是否真接管）。**纠正 `msp_override_channels` 位序=AERT**：只接管三轴=**7**（FC 已设 7 并 `save`）。板端台架跑通；真机待标定。
+- **`experiments/2026-10-11_18_msp_takeover/`（🟡上位机操控下位机）**：`takeover` 两模式——`track`（HSV 绿目标→EMA/滞回→roll/pitch→`SET_RAW_RC`，经 FC `MSP RC Override` 接管）+ `probe`（方向自检：发 roll±/pitch±，回读 `MSP_MOTOR`/`ATTITUDE`/`MSP_RC` 定符号/kp/是否真接管）。**纠正 `msp_override_channels` 位序=AERT**：只接管三轴=**7**（FC 已设 7 并 `save`）。**台架验证通过**（接管生效/油门不被覆盖/混控 Δ 与 `mmix` 一致/符号自洽）；**开放问题：水平误差用 roll 还是 yaw（待定）**；真机待标定。
 
 **下位机** `Low_MCU/`
 - AT32 方案**已冻结**（`archive_at32/agent_at32.md`）。
@@ -104,6 +104,6 @@ LicheeRV Nano (SG2002) 上位机 —— Linux视觉层: 采集→识别→目标
 2. ION 泄漏：Form A/RTSP 正常退出（SIGTERM）可回收（实测 used=0）；**`kill -9` 会泄漏**，需干净重启；程序清理路径在异常分支仍待加固。
 3. **不需要**构建 scpcom 的 kernel/middleware（app 只要公有头 + 板上库）。
 4. NPU INT8 对自定义目标精度（HSV 兜底）；**缺 TDL SDK**。
-5. 下位机 G473：**上位机 MSP 链路已打通**（2026-10-10 复测 `LINK OK`）；**"翻/自旋"已解决（电机编号错位）**；**已插 1S 电池、电压采样已修**（`vbat_scale` 110→1100，`3.95V OK`）。**上位机操控下位机（exp18）已起步**：`MSP RC Override` 接管，**掩码已由 15 改 7**（只接管 roll/pitch/yaw；位序 AERT，`11` 会误接管油门→切油）；板端台架跑通。**下一步：台架 `probe`（压重物/绑绳）定 kp/符号 → 真机 `track` 短飞**。**光流 MTF-02P 已在线**（`OPFLOW/RANGEFINDER=OK`）待标定。
+5. 下位机 G473：**上位机 MSP 链路已打通**（2026-10-10 复测 `LINK OK`）；**"翻/自旋"已解决（电机编号错位）**；**已插 1S 电池、电压采样已修**（`vbat_scale` 110→1100，`3.95V OK`）。**上位机操控下位机（exp18）台架验证通过**：`MSP RC Override` 接管生效、**掩码=7**（只接管 roll/pitch/yaw；位序 AERT，`11` 会误接管油门→切油）、混控 Δ 与 `mmix` 一致、符号自洽。**下一步：先定"水平误差 roll vs yaw" → 真机 `track` 短飞标 kp/相机朝向**。**光流 MTF-02P 已在线**（`OPFLOW/RANGEFINDER=OK`）待标定。
 6. 撞击检测采样率受限 → 与视觉联合判定。
 7. **定高/定点（ALTHOLD/POSHOLD）**：本板**无板载气压计**（官方页 `Baro: —`；INAV `BARO=UNAVAILABLE`，`baro_hardware` AUTO 会被写回 NONE）。INAV 的高度前提 `navReadyAltControl` **只认气压计/GPS**，**光流+激光测距不算** → **已确认跳过**。若将来要做：外接 **BMP280/DPS310 到 I2C1**（PA15/PB7），再 `baro_hardware=AUTO` + `inav_allow_dead_reckoning=ON` 即可无 GPS 定高/光流定点。
