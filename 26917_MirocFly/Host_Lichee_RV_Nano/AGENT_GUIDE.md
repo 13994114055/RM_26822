@@ -97,6 +97,7 @@ Host_Lichee_RV_Nano/
 - **`experiments/2026-09-27_10_tdl_infer/`（✅可复用推理层）**：`include/mf/tdl.h`(C 接口) + `src/mf_tdl.cpp`（相机/TDL检测/自绘框/RTSP）。`tdl_app` 相机实时检测 + 画框 + RTSP 叠加：`rtsp://10.222.2.1:554/h265`（**H265** 1280×720，~16 FPS）。**坑见 B14**：`TDL_WrapImage` 传**帧指针**（`VIDEO_FRAME_INFO_S *frame=NULL; TDL_WrapImage(image,&frame)`），传结构体会导致 RTSP 花屏。
 - **`experiments/2026-09-28_11_quantize/`（✅TPU-MLIR 量化）**：**在 Linux i5** 上用 TPU-MLIR docker 把 ONNX 量化成 cv181x INT8 `cvimodel`。环境：镜像走**算能国内 CDN**（`tpuc_dev_v3.4.tar.gz` 2.12GB）→ `docker load`；容器内 `pip install tpu_mlir` 后 commit。三段式：`model_transform.py → run_calibration.py → model_deploy.py --quantize INT8 --processor cv181x`。实测 `resnet18`→cvimodel，板上 `npu_hello` **43.9 FPS**。**坑见 B15**（Docker Hub 慢/内容存储被中断拉取污染/bridge 网络坏用 `--network none`/镜像缺 tpu_mlir）。
 - **`experiments/2026-09-29_12_armor_led/`（🟡传统CV装甲板 S0+S1）**：不依赖训练的**并行兜底/预研**。S0 `pc_tune/gen_synth_armor.py`（**纯 PIL** + 自解 8×8 单应）生成**透视梯形**合成图 21 张 + 真值 `synth_armor/labels.csv`；S1 `pc_tune/detect_armor.py`（**cv2**；PC 独立 venv `~/.venvs/mirocfly` 装 `opencv-python 5.0.0`，**与板端 opencv-mobile 5.0.0 对齐**）：通道差(`红=R−max(G,B)`/`蓝=B−max(R,G)`)→形态学→`minAreaRect`→同色**松弛配对**→**四点四边形对角线交点**为中心。合成集 **召回/精确 100%、中心误差 0.34px**。坑见 B16。S2 板端移植待做。
+- **闭环系列（台架, 2026-10-10）**：`experiments/2026-10-10_14_green_fly_smooth`（偏移 EMA 平滑+丢检滞回+FC 遥测回读）、`…/15_closedloop_overlay`（RTSP 上叠加 检测框/offset/RC/FC姿态）、`…/16_impact_detect`（`RAW_IMU` 加速度突增撞击，敲击实测峰值 5.35g）、`…/17_task_state_machine`（干跑状态机 IDLE→…→DONE + 视觉/IMU 撞击 + **相机 pitch 偏置参数 `pitch_bias_px`**）。**下一步：HSV 绿目标 → 操控 FC 行动**（新建 `exp18`；FC 侧 `aux(ch8)→BOX_MSP_RC_OVERRIDE` 已配）。
 - **面试复盘**：`interview_notes.md`（按阶段 Q&A）+ `edge_ai_cheatsheet.md`（速查）。
 - **实验 01/02/03（旧/存档）**：低层 MMF、sipeed 链、Form A 首次实验，均不再作为正解。
 - `sensor_cfg.ini`：GC4653 **beta**（= 板默认）；由镜像 `/etc/init.d/S02config` 选 alpha/beta + 设 pinmux。
@@ -111,5 +112,7 @@ Host_Lichee_RV_Nano/
 4. **TDL SDK 缺失** → 阶段 2 补（YOLO）。
 5. NPU INT8 对自定义目标精度 → 保留 HSV 兜底。
 6. 撞击检测用 `MSP_RAW_IMU` 轮询（采样率受限）→ 与视觉"bbox 达阈值"联合判定。
+7. **定高/定点（ALTHOLD/POSHOLD）已确认跳过**：下位机**无板载气压计**（官方页 `Baro: —`）；INAV 的高度前提只认气压计/GPS，**光流+测距不算** → 本板不可用。如需：外接下位机 I2C1 气压计（BMP280/DPS310）。详见 `../Low_MCU/new_mcu/AGENT_GUIDE.md` §6-16。
+8. **下一步开发**：**HSV 绿目标 → 操控下位机行动**（`exp18`，MSP RC Override 接管）。相机若换带 pitch 角模具，只改 `pitch_bias_px` 并单点标定。
 
 > 维护提醒：每次推进/方案变更，同步更新本文件 + 根 `README.md` / `agent.md` + `difficulty_and_method.md`。
