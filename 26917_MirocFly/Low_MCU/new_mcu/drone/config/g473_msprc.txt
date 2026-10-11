@@ -19,7 +19,10 @@ set receiver_type = SERIAL
 set serialrx_provider = CRSF
 
 # --- MSP 接管 (RC 优先/硬件兜底) ---
-set msp_override_channels = 15           # 允许被 MSP 覆盖的通道 = 前4路(AETR)
+# ⚠️ 位序 = AERT(内部通道号): bit0=roll bit1=pitch bit2=yaw bit3=throttle
+#    (源码 rx/msp_override.c + fc/rc_controls.h: ROLL=0 PITCH=1 YAW=2 THROTTLE=3)
+#    => 只接管"三轴"、油门留飞行员 = 0111 = 7 ;  (15=全接管; 11=误接管油门!)
+set msp_override_channels = 7            # 只接管 roll/pitch/yaw, 油门走物理 CRSF
 aux 0 50 3 1700 2100                     # ch8(AUX序号3) 在 [1700,2100) -> 启用 "MSP RC OVERRIDE"(永久ID 50) => 上位机接管; 否则听接收机
 # 注意: 区间右端 [1700,2100) 不含 2100; 上电后在 Receiver 页确认 ch8 实际脉宽
 
