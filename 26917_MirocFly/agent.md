@@ -103,5 +103,6 @@ LicheeRV Nano (SG2002) 上位机 —— Linux视觉层: 采集→识别→目标
 2. ION 泄漏：Form A/RTSP 正常退出（SIGTERM）可回收（实测 used=0）；**`kill -9` 会泄漏**，需干净重启；程序清理路径在异常分支仍待加固。
 3. **不需要**构建 scpcom 的 kernel/middleware（app 只要公有头 + 板上库）。
 4. NPU INT8 对自定义目标精度（HSV 兜底）；**缺 TDL SDK**。
-5. 下位机 G473：**上位机 MSP 链路已打通**；**"翻/自旋"已解决（电机编号错位）**；当前等电池做**短悬停自稳验证 / PID**；**光流 MTF-02P 待验证**。
+5. 下位机 G473：**上位机 MSP 链路已打通**（2026-10-10 复测 `LINK OK`）；**"翻/自旋"已解决（电机编号错位）**；**已插 1S 电池、电压采样已修**（`vbat_scale` 110→1100，`3.95V OK`）。**下一步：上位机操控下位机**（HSV 绿目标→roll/pitch→MSP RC Override 接管）。**光流 MTF-02P 待验证**。
 6. 撞击检测采样率受限 → 与视觉联合判定。
+7. **定高/定点（ALTHOLD/POSHOLD）**：本板**无板载气压计**（官方页 `Baro: —`；INAV `BARO=UNAVAILABLE`，`baro_hardware` AUTO 会被写回 NONE）。INAV 的高度前提 `navReadyAltControl` **只认气压计/GPS**，**光流+激光测距不算** → **已确认跳过**。若将来要做：外接 **BMP280/DPS310 到 I2C1**（PA15/PB7），再 `baro_hardware=AUTO` + `inav_allow_dead_reckoning=ON` 即可无 GPS 定高/光流定点。
