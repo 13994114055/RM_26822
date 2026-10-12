@@ -153,13 +153,11 @@ static int run_track(int fd, int req_w, int req_h, int frames)
 	int sx = (int)envd("MIROCFLY_SX", 1), sy = (int)envd("MIROCFLY_SY", 1);
 	double ema = 0.35; int hold = 12;   /* 检测平滑/滞回 */
 
-	if (!g_dry) {
-		mf_camera_cfg_t cfg; mf_camera_cfg_default(&cfg);
-		cfg.width = req_w; cfg.height = req_h;
-		if (mf_camera_open(&cfg) != 0) { fprintf(stderr, "camera open failed\n"); return -1; }
-		mf_camera_warmup(10);
-		printf("camera ready sensor=0x%x\n", mf_camera_sensor_id());
-	}
+	mf_camera_cfg_t cfg; mf_camera_cfg_default(&cfg);
+	cfg.width = req_w; cfg.height = req_h;
+	if (mf_camera_open(&cfg) != 0) { fprintf(stderr, "camera open failed\n"); return -1; }
+	mf_camera_warmup(10);
+	printf("camera ready sensor=0x%x\n", mf_camera_sensor_id());
 	printf("gains: kpvis=%.2f kd=%.0f kpp=%.0f leak=%.3f alpha=%.2f maxd=%d sx=%d sy=%d%s\n",
 	       kpvis, kd, kpp, posleak, alpha, maxd, sx, sy, g_dry ? " [DRY]" : "");
 
@@ -173,7 +171,7 @@ static int run_track(int fd, int req_w, int req_h, int frames)
 
 	while (!g_exit) {
 		int offx = 0, offy = 0, found = 0;
-		if (!g_dry || 1) {
+		{
 			mf_frame_t f;
 			if (mf_camera_get_frame(&f, 5000) != 0) break;
 			int w = f.width, h = f.height;
@@ -267,7 +265,7 @@ static int run_track(int fd, int req_w, int req_h, int frames)
 		if (frames > 0 && seq >= frames) break;
 		if (g_secs > 0 && now - t0 >= g_secs) break;
 	}
-	if (!g_dry) mf_camera_close();
+	mf_camera_close();
 	if (!g_dry) send_rc(fd, 1500, 1500, 1500);
 	printf("done frames=%d\n", seq);
 	return 0;
