@@ -87,27 +87,42 @@ def read_tag2_3s32(r):        # 3 个有符号字段
             vals[x] = v
     return vals
 
-def skip_tag8_4s16(r):        # 消费正确字节数; 值不重建(本工具不需要 rcData/rcCommand 值)
-    sel = r.u8(); nib = 0
-    for x in range(4):
-        s = (sel >> (2 * x)) & 3
-        if s == 1:
-            if nib == 0: nib = 1
-            else: r.u8(); nib = 0
-        elif s == 2:
-            r.u8()
-        elif s == 3:
-            r.u8(); r.u8()
-    if nib == 1:
-        r.u8()
+def read_tag8_4s16(r):
+    # TAG8_4S16: 1 个选择字节(每字段 2bit: 0=零 1=4bit 2=8bit 3=16bit),
+    # 之后是"4bit 半字节流", 高位半字节先; 每字节装两个半字节(高半字节在前)。
+    # 依据固件 blackbox_encoding.c::blackboxWriteTag8_4S16 逆向。
+    sel = r.u8()
+    kinds = [(sel >> (2 * x)) & 3 for x in range(4)]
+    nibn = {0: 0, 1: 1, 2: 2, 3: 4}
+    total = sum(nibn[k] for k in kinds)
+    stream = []
+    for _ in range((total + 1) // 2):
+        b = r.u8(); stream.append((b >> 4) & 0xF); stream.append(b & 0xF)
+    pos = 0; out = [0, 0, 0, 0]
+    for x, k in enumerate(kinds):
+        n = nibn[k]
+        if n == 0:
+            out[x] = 0
+        elif n == 1:
+            v = stream[pos]; pos += 1
+            out[x] = v - 16 if (v & 8) else v
+        elif n == 2:
+            v = (stream[pos] << 4) | stream[pos + 1]; pos += 2
+            out[x] = sx(v, 8)
+        else:
+            v = (stream[pos] << 12) | (stream[pos + 1] << 8) | (stream[pos + 2] << 4) | stream[pos + 3]
+            pos += 4
+            out[x] = sx(v, 16)
+    return out
 
 def read_tag8_8svb(r, count):
+    # TAG8_8SVB: 1 个头字节(每字段 1bit, 置位则有值), 置位字段逐个 signed-VB。
     if count == 1:
-        read_signed_vb(r); return [0]
+        return [read_signed_vb(r)]
     hdr = r.u8(); out = [0] * count
     for i in range(count):
         if (hdr >> i) & 1:
-            read_signed_vb(r)     # 值不重建
+            out[i] = read_signed_vb(r)
     return out
 
 # ---------------- 逐帧解码 (按头部编码表) ----------------
@@ -121,11 +136,11 @@ def read_values(r, encs):
         elif e == 7:
             vals = read_tag2_3s32(r); out[i:i+3] = vals; i += 3
         elif e == 8:
-            skip_tag8_4s16(r); i += 4
+            out[i:i+4] = read_tag8_4s16(r); i += 4
         elif e == 6:
             j = i
             while j < n and encs[j] == 6: j += 1
-            read_tag8_8svb(r, j - i); i = j
+            out[i:j] = read_tag8_8svb(r, j - i); i = j
         elif e == 9:
             i += 1
         else:
@@ -180,7 +195,10 @@ def decode(path, index=None):
     Ienc = [int(x) for x in meta['Field I encoding'].split(',')]
     Ppred = [int(x) for x in meta['Field P predictor'].split(',')]
     Penc = [int(x) for x in meta['Field P encoding'].split(',')]
-    Senc = [int(x) for x in meta['Field S encoding'].split(',')] if 'Field S encoding' in meta else []
+    Snames = meta['Field S name'].split(',') if 'Field S name' in meta else None
+    Senc = [int(x) for x in meta['Field S encoding'].split(',')] if 'Field S encoding' in meta else None
+    Spred = [int(x) for x in meta['Field S predictor'].split(',')] if 'Field S predictor' in meta else None
+    ns = len(Snames) if Snames else 0
 
     cfg = {
         'minthrottle': int(meta.get('minthrottle', '1080')),
@@ -190,6 +208,7 @@ def decode(path, index=None):
 
     # 逐段(每个 'H Product' 视为一段) 解码
     h1 = [0] * n; h2 = [0] * n
+    sh1 = [0] * ns; sh2 = [0] * ns
     logs = []; cur = None
     desync = 0
     while not r.eof():
@@ -197,7 +216,9 @@ def decode(path, index=None):
         if m == ord('H'):
             r.i += 1
             if parse_header_line(b'H' + r.readline(), meta) == 'Product':
-                h1 = [0] * n; h2 = [0] * n; cur = None   # 新的一段日志
+                h1 = [0] * n; h2 = [0] * n
+                sh1 = [0] * ns; sh2 = [0] * ns
+                cur = None   # 新的一段日志
         elif m in (ord('I'), ord('P')):
             r.i += 1
             intr = (m == ord('I'))
@@ -219,8 +240,20 @@ def decode(path, index=None):
             else: h2 = h1; h1 = list(c)
         elif m == ord('S'):
             r.i += 1
-            try: read_values(r, Senc) if Senc else None
-            except Exception: r.i += 1
+            if Senc:
+                try:
+                    dl = read_values(r, Senc)
+                    cs = [0] * ns
+                    for k in range(ns):
+                        p = apply_pred(Spred[k], k, sh1, sh2, cs, cfg)
+                        cs[k] = p if dl[k] is None else p + dl[k]
+                    if cur is not None:
+                        cur.append(('S', cs))     # 慢帧挂在当前段内
+                    sh2 = sh1; sh1 = list(cs)
+                except Exception:
+                    desync += 1; r.i += 1
+            else:
+                r.i += 1
         elif m == ord('E'):
             r.i += 1
             t = r.u8()
@@ -238,7 +271,13 @@ def decode(path, index=None):
     return names, IX, logs, desync, meta
 
 # ---------------- 输出 ----------------
+def ip_rows(lf):
+    return [c for m, c in lf if m in ('I', 'P')]
+
 def summarize(lf, IX, idx):
+    lf = [(m, c) for m, c in lf if m in ('I', 'P')]
+    if not lf:
+        return
     T = [c[IX['time']] for _, c in lf]
     t0 = T[0]
     def col(field, div=1.0):
@@ -267,7 +306,7 @@ def export_csv(lf, names, IX, path):
     import csv
     with open(path, 'w', newline='') as f:
         w = csv.writer(f); w.writerow(names)
-        for _, c in lf:
+        for c in ip_rows(lf):
             w.writerow(c)
     print("CSV 已写: %s (%d 帧)" % (path, len(lf)))
 
@@ -292,10 +331,45 @@ def fft(a):
         ln <<= 1
     return A
 
+def trace(lf, IX, fields, times=40, tmin=None, tmax=None):
+    rows = [(c[IX['time']], c) for c in ip_rows(lf)]
+    if not rows:
+        print("无 I/P 帧"); return
+    cols = [f for f in fields if f in IX]
+    t0 = rows[0][0]
+    rows = [r for r in rows if (tmin is None or (r[0]-t0)/1e6 >= tmin) and (tmax is None or (r[0]-t0)/1e6 <= tmax)]
+    if not rows:
+        print("该时间窗无帧"); return
+    print("  t_s   " + " ".join("%9s" % c for c in cols))
+    step = max(1, len(rows) // times)
+    for i in range(0, len(rows), step):
+        t, c = rows[i]
+        print("  %6.2f " % ((t - t0) / 1e6) + " ".join("%9d" % c[IX[f]] for f in cols))
+
+def slow_dump(lf, IX, Snames):
+    if not Snames:
+        print("无慢字段"); return
+    SIX = {nm: i for i, nm in enumerate(Snames)}
+    want = [f for f in ('mspOverrideFlags', 'flightModeFlags', 'flightModeFlags2',
+                        'activeFlightModeFlags', 'stateFlags', 'failsafePhase',
+                        'rxSignalReceived', 'rxFlightChannelsValid', 'rxUpdateRate',
+                        'escRPM', 'escTemperature') if f in SIX]
+    t0 = None; last_t = 0
+    print("  t_s   " + " ".join("%9s" % f for f in want) + "  | override")
+    for m, c in lf:
+        if m in ('I', 'P'):
+            if t0 is None: t0 = c[IX['time']]
+            last_t = c[IX['time']]
+        elif m == 'S' and t0 is not None:
+            ovf = c[SIX['mspOverrideFlags']] if 'mspOverrideFlags' in SIX else 0
+            print("  %6.2f " % ((last_t - t0) / 1e6) +
+                  " ".join("%9d" % c[SIX[f]] for f in want) +
+                  "  | override=%d failsafe=%d" % ((ovf >> 1) & 1, ovf & 1))
+
 def spectrum(lf, IX, field):
     if field not in IX:
         print("无字段 %s" % field); return
-    a = [(c[IX['time']], c[IX[field]]) for _, c in lf]
+    a = [(c[IX['time']], c[IX[field]]) for c in ip_rows(lf)]
     import statistics
     t = [x[0] for x in a]; v = [x[1] for x in a]
     dt = statistics.median([t[i+1] - t[i] for i in range(len(t)-1)])
@@ -319,13 +393,18 @@ def main():
     ap.add_argument('--index', type=int, default=None, help='选择第 N 段(0基); 默认取帧数最多的一段')
     ap.add_argument('--csv', help='导出所选段全部字段到 CSV')
     ap.add_argument('--spectrum', help='对某字段做频谱(如 gyroADC[0])')
+    ap.add_argument('--trace', help='打印指定字段时序(逗号分隔, 如 rcCommand[1],rcData[3],attitude[1],surfaceRaw)')
+    ap.add_argument('--slow', action='store_true', help='打印慢帧(mspOverrideFlags/flightModeFlags/escRPM...)')
+    ap.add_argument('--npoints', type=int, default=40, help='--trace 采样点数(默认40)')
+    ap.add_argument('--tmin', type=float, default=None, help='--trace 起始秒')
+    ap.add_argument('--tmax', type=float, default=None, help='--trace 结束秒')
     a = ap.parse_args()
 
     names, IX, logs, desync, meta = decode(a.log)
     logs = [x for x in logs if len(x) > 50]
     print("字段数 %d | 段数 %d | desync %d" % (len(names), len(logs), desync))
     print("固件: %s" % get('Firmware revision', meta, '?'))
-    print("段帧数: %s" % [len(x) for x in logs])
+    print("段I/P帧数: %s" % [len(ip_rows(x)) for x in logs])
 
     if a.list or not logs:
         return
@@ -334,6 +413,10 @@ def main():
         raise SystemExit("index 越界")
     lf = logs[idx]
     summarize(lf, IX, idx)
+    if a.slow:
+        slow_dump(lf, IX, meta.get('Field S name', '').split(',') if 'Field S name' in meta else None)
+    if a.trace:
+        trace(lf, IX, a.trace.split(','), a.npoints, a.tmin, a.tmax)
     if a.csv:
         export_csv(lf, names, IX, a.csv)
     if a.spectrum:
