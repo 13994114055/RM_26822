@@ -24,7 +24,8 @@
 | 16 | 2026-10-10 | [2026-10-10_16_impact_detect](./2026-10-10_16_impact_detect/) | **撞击检测**（`MSP_RAW_IMU` 加速度模长突增，相对基线） | ✅ 台架跑通：`\|a\|≈1g` 稳定、输入正常；敲击即触发 `*** IMPACT ***` | **完成**（待敲击实测） |
 | 17 | 2026-10-10 | [2026-10-10_17_task_state_machine](./2026-10-10_17_task_state_machine/) | **任务状态机雏形**（干跑：IDLE→…→DONE + 视觉/IMU 撞击 + 相机 pitch 偏置参数） | ✅ 台架整链跑通：把绿目标怼近 → `APPROACH→IMPACT→RECOVER→RTH→LAND→DONE` | **完成**（干跑；真机油门/位置待接） |
 | 18 | 2026-10-11 | [2026-10-11_18_msp_takeover](./2026-10-11_18_msp_takeover/) | **上位机操控下位机**（HSV 绿目标→roll/pitch→`SET_RAW_RC`，经 FC `MSP RC Override` 接管） | ✅ **台架验证通过**（真 FC `/dev/ttyS0`）：接管生效(`MSP_RC` 回读吻合)、mask=7 油门不被覆盖、混控 Δ 与 `mmix` 一致、符号自洽 | **进行中**（含 INAV 掩码位序 AERT 纠正=7；待定 roll/yaw 与真机） |
-| 19 | 2026-10-12 | [2026-10-12_19_opflow_hold](./2026-10-12_19_opflow_hold/) | **上位机光流水平阻尼/定点**（读 `MSP2_INAV_OPTICAL_FLOW` 0x2001 + `MSP_SONAR_ALTITUDE` 58 → 估水平速度 → roll/pitch 阻尼） | 🟡 代码就绪（新增 MSP **v2** 收发 + `mon` 只读模式）；待板子接回验证光流数据 | **进行中** |
+| 19 | 2026-10-12 | [2026-10-12_19_opflow_hold](./2026-10-12_19_opflow_hold/) | **上位机光流水平阻尼/定点**（读 `MSP2_INAV_OPTICAL_FLOW` 0x2001 + `MSP_SONAR_ALTITUDE` 58 → 估水平速度 → roll/pitch 阻尼） | 🟡 `mon` 已验光流数据通路（q≈40–60）；`damp` 待台架/真机 | **进行中** |
+| 20 | 2026-10-12 | [2026-10-12_20_paradigm_select](./2026-10-12_20_paradigm_select/) | **接管三轴 + 范式/定点/定高选择**（ch6>1300 或 ch8>1300 接管；ch6→范式B；ch7→定点/定高；基础**光流阻尼**始终叠加） | 🟡 代码就绪、已编译；待改 FC aux + `dry` 验证 + 台架 | **进行中** |
 
 ## 相关文档（上层）
 - `../README.md`（项目总览）、`../agent.md`（AI 上下文）

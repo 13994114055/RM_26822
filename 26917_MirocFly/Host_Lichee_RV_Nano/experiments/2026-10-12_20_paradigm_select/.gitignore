@@ -1,0 +1,6 @@
+paradigm
+*.o
+*.raw
+*.bmp
+*.png
+*.jpg
