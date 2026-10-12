@@ -88,6 +88,76 @@ static int poll_tele(int fd, msp_parser2_t *p, tele *t, int timeout_ms)
 	return frames;
 }
 
+/* ---- damp: 光流水平速度阻尼 ----
+ * 依据 FC 约定(navigation_pos_estimator_flow.c):
+ *   v_right  = + (flowRate[X]-bodyRate[X]) * alt   [rad/s * m = m/s]
+ *   v_forward= - (flowRate[Y]-bodyRate[Y]) * alt
+ * 阻尼: 右移->左滚(roll<1500); 前移->抬头(pitch>1500)
+ *   roll  = 1500 - K*sx*v_right
+ *   pitch = 1500 - K*sy*transY*S   (等价, 见下)
+ * S = (pi/180)*alt_m ; sx/sy 为可调符号(标定用)
+ */
+static int clamp_rc(int v){ if(v<1000)v=1000; if(v>2000)v=2000; return v; }
+
+static int run_damp(int fd)
+{
+	double kd = envd("MIROCFLY_KD", 150.0);       /* RC 单位 / (m/s) */
+	int maxd = (int)envd("MIROCFLY_MAXDELTA", 250);
+	int sx = (int)envd("MIROCFLY_SX", 1);         /* roll 符号矫正 */
+	int sy = (int)envd("MIROCFLY_SY", 1);         /* pitch 符号矫正 */
+	double alt_fb = envd("MIROCFLY_ALT_M", 0.3);  /* 无测距兜底高度 */
+	double alpha = envd("MIROCFLY_ALPHA", 0.25);  /* 速度 EMA */
+
+	printf("=== flow_damp damp: 光流水平速度阻尼 (不发油门) ===\n");
+	printf("kd=%.0f maxd=%d sx=%d sy=%d alt_fb=%.2f alpha=%.2f\n", kd, maxd, sx, sy, alt_fb, alpha);
+	printf("前提: ANGLE + 油门>min_check(1100) + ch8 接管\n\n");
+
+	msp_parser2_t p; msp_parser2_init(&p);
+	tele t; memset(&t, 0, sizeof(t));
+	double t0 = now_s(), tlog = 0, vr = 0, vf = 0;
+	long seq = 0;
+	while (!g_exit) {
+		send_reqs(fd);
+		poll_tele(fd, &p, &t, 6);
+
+		double altm = (t.alt_cm >= 5) ? t.alt_cm / 100.0 : alt_fb;
+		double S = (M_PI / 180.0) * altm;    /* deg/s -> (m/s)/(deg/s) */
+		double inst_vr = (t.flow_x - t.body_x) * S;   /* 右向速度 m/s */
+		double inst_vf = -(t.flow_y - t.body_y) * S;  /* 前向速度 m/s */
+		if (!t.got_flow) { inst_vr = 0; inst_vf = 0; }
+		vr = alpha * inst_vr + (1 - alpha) * vr;
+		vf = alpha * inst_vf + (1 - alpha) * vf;
+
+		int roll = clamp_rc((int)(1500 - sx * kd * vr));
+		int pitch = clamp_rc((int)(1500 - sy * kd * vf));
+		if (roll < 1500 - maxd) roll = 1500 - maxd;
+		if (roll > 1500 + maxd) roll = 1500 + maxd;
+		if (pitch < 1500 - maxd) pitch = 1500 - maxd;
+		if (pitch > 1500 + maxd) pitch = 1500 + maxd;
+		/* 若没读到光流, 回中避免乱动 */
+		if (!t.got_flow) { roll = 1500; pitch = 1500; }
+
+		uint16_t ch[16];
+		for (int i = 0; i < 16; i++) ch[i] = 1500;
+		ch[0] = roll; ch[1] = pitch; ch[2] = 1000; ch[3] = 1500;  /* AETR payload; 油门被掩码忽略 */
+		msp_send_set_raw_rc(fd, ch, 16);
+
+		double now = now_s();
+		if (now - tlog >= 0.15) {
+			tlog = now;
+			printf("[%6.1fs] q=%3d tX=%6d tY=%6d alt=%ldcm | vR=%+.2f vF=%+.2f | -> roll=%4d pitch=%4d\n",
+			       now - t0, t.quality, t.flow_x - t.body_x, t.flow_y - t.body_y,
+			       t.alt_cm, vr, vf, roll, pitch);
+		}
+		usleep(15000);
+		seq++;
+		if (g_secs > 0 && now - t0 >= g_secs) break;
+	}
+	/* 退出: 回中(若在真 FC 上则给中性; PTY 无害) */
+	{ uint16_t ch[16]; for (int i = 0; i < 16; i++) ch[i] = 1500; msp_send_set_raw_rc(fd, ch, 16); }
+	return 0;
+}
+
 static int run_mon(int fd)
 {
 	printf("=== flow_damp mon: 只读光流/测距/姿态 (不发控制) ===\n");
@@ -149,7 +219,7 @@ int main(int argc, char *argv[])
 
 	int rc = 0;
 	if (strcmp(mode, "damp") == 0) {
-		printf("[damp 尚未实现] 先用 mon 验证光流数据. 退出.\n");
+		rc = run_damp(fd);
 	} else {
 		rc = run_mon(fd);
 	}
