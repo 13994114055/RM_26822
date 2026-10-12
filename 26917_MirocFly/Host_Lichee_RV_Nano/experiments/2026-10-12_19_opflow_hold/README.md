@@ -27,6 +27,15 @@ LD_LIBRARY_PATH=/mnt/system/usr/lib:/mnt/system/usr/lib/3rd ./flow_damp mon /dev
 ```
 env：`MIROCFLY_KD`（阻尼增益）、`MIROCFLY_ALT_M`（无测距兜底高度）、`MIROCFLY_SECS`（限时）。
 
+## damp 环境变量（现场可调，免重编）
+`MIROCFLY_KD`（阻尼增益 RC/(m/s)，默认 150）、`MIROCFLY_SX`/`MIROCFLY_SY`（roll/pitch 符号 ±1）、`MIROCFLY_MAXDELTA`（限幅，默认 250）、`MIROCFLY_ALPHA`（速度 EMA，默认 0.25）、`MIROCFLY_ALT_M`（无测距兜底高度）、`MIROCFLY_SECS`（限时）。
+
+## 预启动（脱离电脑测试）
+程序支持 `MIROCFLY_SECS`：运行 N 秒后**干净退出**。板上脚本（自包含、部署到 `/root/mirocfly/`）：
+- `./run_flowdamp.sh [secs=90] [kd=150] [sx=1] [sy=1]`：`nohup` 后台跑 `damp`，日志写 `flowdamp_<时间>.log`，路径存 `last_flowdamp.txt`，到点自停。
+- `./stop_flowdamp.sh`：SIGTERM 停止。
+- 流程：ssh 启动 → 确认在跑 → **拔 USB**（LicheeRV 电池供电）→ 遥控器 ANGLE/解锁/油门/ch8 接管 → 轻推飞机看是否反向抵抗 → 到点自停 → 插回读日志。
+
 ## 步骤（渐进）
 1. `mon` 静止 → 看 `q`（quality>0）、`flowX/flowY` 噪声；**水平平移机身** → 看 `transX/transY` 的符号/量级（定轴与符号）。
 2. 实现 `damp`，台架（压重物）验证阻尼方向。
