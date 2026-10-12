@@ -89,6 +89,7 @@ IDLE → ARM → TAKEOFF → SEEK(搜索目标) → APPROACH(接近撞击)
 - `Host_Lichee_RV_Nano/LicheeSG-Nano-Build_scpcom/` — **scpcom 源码树**（与板上镜像同源；相机样例在 `middleware/sample/test_mmf/`）
 - `Low_MCU/README.md` — **下位机总览**（接口约定 + 新主控 `new_mcu/`）
 - `Low_MCU/archive_at32/agent_at32.md` — 下位机 AT32 经验存档（**已冻结**）
+- **`tools/README.md`** — **调试/分析工具集**（`msp_probe` 链路验证、`msp_live.py` 实时监控、`telem_mon` 板上只读遥测、`blackbox_decode.py` 黑匣子解码）
 - `agent.md` — AI Agent 工作空间上下文（决策/协议/进度）
 - `Host_Lichee_RV_Nano/difficulty_and_method.md` — 困难与解决办法（复盘/面试用）
 - `Host_Lichee_RV_Nano/diary.md` — **上位机操作手册**（如何编译/部署/运行各功能与排错）

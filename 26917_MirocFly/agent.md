@@ -96,6 +96,7 @@ LicheeRV Nano (SG2002) 上位机 —— Linux视觉层: 采集→识别→目标
 - 上位机结构约定：实验档案制 `experiments/<日期>_<编号>_<描述>/`（自包含、不覆盖）；未来功能各自开新实验（MSP 链路 / 视觉检测 / 控制 / 任务）。任务逻辑与协议编码解耦。
 - 测试永远渐进：拔桨 → 绑绳 → 短飞；电机解锁前占空比=0；错误状态必须禁能电机。
 - 只做被明确要求的改动，不擅自扩大范围。
+- **调试/分析工具**集中在 `tools/`（详见 `tools/README.md`）：`msp_probe`（链路验证）、`msp_live.py`（i5 实时监控）、`telem_mon`（板上只读遥测）、`blackbox_decode.py`（INAV 黑匣子解码/频谱）。
 - **维护文档**：推进/方案变更时，同步更新本文件 + `README.md` + 各 `AGENT_GUIDE.md` + `difficulty_and_method.md`。
 
 ## 8. 风险与待确认项（按优先级）
