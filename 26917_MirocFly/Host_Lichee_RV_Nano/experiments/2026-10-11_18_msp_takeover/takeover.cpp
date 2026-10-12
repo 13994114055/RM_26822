@@ -381,7 +381,7 @@ int main(int argc, char *argv[])
 	int baud = 230400;
 	int pitch_bias_px = 0;
 	double kp = envd("MIROCFLY_KP", 0.5);
-	int max_delta = 300;
+	int max_delta = (int)envd("MIROCFLY_MAXDELTA", 300);   /* 摇杆最大偏离(柔和测试可调小) */
 	int probe_step = 200;
 
 	setvbuf(stdout, NULL, _IONBF, 0);
