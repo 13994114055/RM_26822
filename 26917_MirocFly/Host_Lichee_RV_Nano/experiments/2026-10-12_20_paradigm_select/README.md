@@ -45,7 +45,9 @@ aux 3  1  3  800 2100     # ch8 ANGLE
 ./paradigm mon /dev/ttyS0 230400
 # 省略 serial_dev -> PTY(mock FC, 仅逻辑自测)
 ```
-env：`MIROCFLY_KP`(kpvis) `MIROCFLY_KD`(速度增益) `MIROCFLY_KPP`(位置增益) `MIROCFLY_POSLEAK` `MIROCFLY_MAXDELTA` `MIROCFLY_ALPHA` `MIROCFLY_ALT_M` `MIROCFLY_SX/SY` `MIROCFLY_SECS`。
+env：`MIROCFLY_KP`(kpvis) `MIROCFLY_KD`(速度增益) `MIROCFLY_KPP`(位置增益) `MIROCFLY_POSLEAK` `MIROCFLY_MAXDELTA` `MIROCFLY_ALPHA` `MIROCFLY_ALT_M` `MIROCFLY_SX/SY` `MIROCFLY_CAM_ROT`(0|180) `MIROCFLY_SECS`。
+
+**相机倒装冗余**：`MIROCFLY_CAM_ROT=180` → 检测前把图像旋转 180°（`cv::rotate`），对 A/B/定点通用。换装后务必**重跑静态标定**（右→roll>1500、上→pitch>1500）。注意 `SX/SY` 只作用于阻尼/定点项，**管不了范式B的视觉方向**，倒装必须靠 `CAM_ROT`。
 
 ## 预启动（脱离电脑）
 - `./run_paradigm.sh [secs=120] [kpvis=0.4] [kd=150] [kpp=60]`：`nohup` 后台跑、日志 `paradigm_<时间>.log`、到点自停。

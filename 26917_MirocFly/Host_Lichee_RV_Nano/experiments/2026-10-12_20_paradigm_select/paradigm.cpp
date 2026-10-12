@@ -93,8 +93,11 @@ static int poll_tele(int fd, tele *t, int timeout_ms)
 			for (int k = 0; k < nc; k++) t->rc[k] = (uint16_t)(pl[2*k] | (pl[2*k+1] << 8));
 			t->nrc = nc; t->got_rc = 1;
 		} else if (cmd == MSP_SONAR_ALTITUDE && len >= 4) {
-			t->alt_cm = (long)(pl[0] | (pl[1] << 8) | (pl[2] << 16) | ((uint32_t)pl[3] << 24));
-			t->got_alt = 1;
+			/* 有符号 int32; 无效读数常为 -1(0xFFFFFFFF)/0/异常值 */
+			int32_t a = (int32_t)(pl[0] | (pl[1] << 8) | (pl[2] << 16) | ((uint32_t)pl[3] << 24));
+			t->alt_cm = (long)a;
+			t->got_alt = (a >= 5 && a <= 800) ? 1 : 0;   /* 仅 [5,800]cm 视为有效 */
+		
 		} else if (cmd == MSP2_INAV_OPTICAL_FLOW && len >= 9) {
 			t->quality = pl[0];
 			t->flow_x = (int16_t)(pl[1] | (pl[2] << 8));
@@ -151,6 +154,7 @@ static int run_track(int fd, int req_w, int req_h, int frames)
 	double alpha = envd("MIROCFLY_ALPHA", 0.25);
 	double alt_fb = envd("MIROCFLY_ALT_M", 0.3);
 	int sx = (int)envd("MIROCFLY_SX", 1), sy = (int)envd("MIROCFLY_SY", 1);
+	int cam_rot = (int)envd("MIROCFLY_CAM_ROT", 0);   /* 相机倒装: 0 或 180 */
 	double ema = 0.35; int hold = 12;   /* 检测平滑/滞回 */
 
 	mf_camera_cfg_t cfg; mf_camera_cfg_default(&cfg);
@@ -158,8 +162,8 @@ static int run_track(int fd, int req_w, int req_h, int frames)
 	if (mf_camera_open(&cfg) != 0) { fprintf(stderr, "camera open failed\n"); return -1; }
 	mf_camera_warmup(10);
 	printf("camera ready sensor=0x%x\n", mf_camera_sensor_id());
-	printf("gains: kpvis=%.2f kd=%.0f kpp=%.0f leak=%.3f alpha=%.2f maxd=%d sx=%d sy=%d%s\n",
-	       kpvis, kd, kpp, posleak, alpha, maxd, sx, sy, g_dry ? " [DRY]" : "");
+	printf("gains: kpvis=%.2f kd=%.0f kpp=%.0f leak=%.3f alpha=%.2f maxd=%d sx=%d sy=%d cam_rot=%d%s\n",
+	       kpvis, kd, kpp, posleak, alpha, maxd, sx, sy, cam_rot, g_dry ? " [DRY]" : "");
 
 	msp_parser2_init(&g_rx);
 	tele t; memset(&t, 0, sizeof(t));
@@ -178,6 +182,7 @@ static int run_track(int fd, int req_w, int req_h, int frames)
 			cv::Mat yuv(h * 3 / 2, w, CV_8UC1, (void *)f.data);
 			cv::Mat bgr; cv::cvtColor(yuv, bgr, cv::COLOR_YUV2BGR_NV21);
 			mf_camera_frame_free();
+			if (cam_rot == 180) cv::rotate(bgr, bgr, cv::ROTATE_180);  /* 相机倒装冗余 */
 			cv::Mat small, hsv, mask;
 			cv::resize(bgr, small, cv::Size(DET_W, DET_H));
 			cv::cvtColor(small, hsv, cv::COLOR_BGR2HSV);
@@ -212,8 +217,8 @@ static int run_track(int fd, int req_w, int req_h, int frames)
 		int ding = ovr && (ch7 >= 1300 && ch7 < 1700);   /* 定点 */
 		int gao = ovr && (ch7 >= 1700);                  /* 定高 */
 
-		/* 光流 -> 速度(m/s), EMA */
-		double altm = (t.alt_cm >= 5) ? t.alt_cm / 100.0 : alt_fb;
+		/* 光流 -> 速度(m/s), EMA; 测距无效时用兜底高度 */
+		double altm = t.got_alt ? (t.alt_cm / 100.0) : alt_fb;
 		double S = (M_PI / 180.0) * altm;
 		int transX = t.flow_x - t.body_x, transY = t.flow_y - t.body_y;
 		double ivr = transX * S, ivf = -transY * S;
