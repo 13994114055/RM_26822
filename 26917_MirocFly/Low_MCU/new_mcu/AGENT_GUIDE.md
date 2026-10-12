@@ -101,7 +101,7 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
 - Configurator：`/home/user/Zip_app/INAV_Configurator-linux-x64-10.0.0/inav-configurator`（10.0.0-RC1）。
 
 ### 3.4 上位机链路验证
-- `connection/msp_probe.c`：在 LicheeRV 上跑，验证 FC↔上位机 MSP（ATTITUDE/STATUS/RAW_IMU，LINK OK）。需交叉编译（RISC-V）。
+- `tools/msp_probe.c`：在 LicheeRV 上跑，验证 FC↔上位机 MSP（ATTITUDE/STATUS/RAW_IMU，LINK OK）。需交叉编译（RISC-V）。
 
 ---
 
@@ -177,7 +177,7 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
    - 哪个轴帮倒忙 → 对应改 `align_board`/`mmix`/`motor_direction_inverted`，**一次只改一处**。
 4. 通过再上桨，**绑绳 → 短飞**。
 
-**工具**：① 自写 INAV blackbox v2 解码器（读 `~/Downloads/blackbox_log_*.TXT`）；② 台架 `msp_live.py`（读 `ATTITUDE/RAW_IMU/MOTOR`）。
+**工具**：① 自写 INAV blackbox v2 解码器 `tools/blackbox_decode.py`（读 `~/Downloads/blackbox_log_*.TXT`，出姿态/舵面/电机 + 频谱）；② 台架实时读 `tools/msp_live.py`（i5，读 `ATTITUDE/RAW_IMU/MOTOR`）/ `tools/telem_mon.c`（板上只读遥测）。详见 `../../tools/README.md`。
 
 ---
 

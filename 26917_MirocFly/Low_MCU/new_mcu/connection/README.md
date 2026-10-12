@@ -84,9 +84,9 @@ INAV 限制 **最多 3 个 MSP 端口**（`MAX_MSP_PORT_COUNT=3`，见 `io/seria
 - 现有程序：`Host_Lichee_RV_Nano/experiments/2026-09-26_07_msp_link/`（`msp_test`）、`.../08_vision_control/`（`green_fly`）。
   真硬件命令形如：`./msp_test inject /dev/ttyS0 230400 10` / `monitor /dev/ttyS0 230400`。
 - **前提**：LicheeRV 的 **UART0 console 已释放**（`/etc/inittab` 注释 console getty）；`/dev/ttyS0` 可被 MSP 打开。
-- 实测工具：`connection/msp_probe`（发 MSP 请求读响应）+ `fccli.py`（经 USB VCP 配 FC）。
+- 实测工具：`tools/msp_probe`（发 MSP 请求读响应）+ `fccli.py`（经 USB VCP 配 FC）。
 - ⚠️ **FC 处于 CLI 模式时 UART2 的 MSP 不响应**：用 USB CLI 读/改配置后，链路会短暂 `NO RESPONSE` → `save`（重启）或 `exit`，并**等 ~15–20s** 再测。别误判成接错线。
-- 台架实时读：`connection/msp_live.py`（i5 侧，读 `ATTITUDE/RAW_IMU/MOTOR`）+ `connection/telem_mon.c`（板上只读遥测，编译到 LicheeRV：读 `ATTITUDE/RAW_IMU`，不发控制）。
+- 台架实时读：`tools/msp_live.py`（i5 侧，读 `ATTITUDE/RAW_IMU/MOTOR`）+ `tools/telem_mon.c`（板上只读遥测，编译到 LicheeRV：读 `ATTITUDE/RAW_IMU`，不发控制）；黑匣子解析 `tools/blackbox_decode.py`。详见 `../../../tools/README.md`。
 
 ## 7. 接线前验证清单（硬件到位时逐条过）
 1. **LicheeRV `/dev/ttyS0`(UART0, A16/A17) 可用**：先**释放 console getty**，再**回环**（A16↔A17 短接，用 `msp_probe /dev/ttyS0 <baud>` 读到自身帧）确认。
