@@ -1,0 +1,6 @@
+flow_damp
+*.o
+*.raw
+*.bmp
+*.png
+*.jpg
