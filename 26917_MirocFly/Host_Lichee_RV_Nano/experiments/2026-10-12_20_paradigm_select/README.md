@@ -39,9 +39,11 @@ aux 3  1  3  800 2100     # ch8 ANGLE
 
 ## 用法
 ```
-./paradigm [run|dry|mon] [w] [h] [frames] [serial_dev] [baud=230400]
-# dry = 只算不发 RC(静态验证); mon = 只读光流/RC; 省略 serial_dev -> PTY
-LD_LIBRARY_PATH=/mnt/system/usr/lib:/mnt/system/usr/lib/3rd ./paradigm dry 1280 720 0 /dev/ttyS0 230400
+# run/dry: [mode] [w] [h] [frames] [serial_dev] [baud]
+./paradigm dry 1280 720 0 /dev/ttyS0 230400
+# mon: [mode] [serial_dev] [baud]  (只读, 无相机)
+./paradigm mon /dev/ttyS0 230400
+# 省略 serial_dev -> PTY(mock FC, 仅逻辑自测)
 ```
 env：`MIROCFLY_KP`(kpvis) `MIROCFLY_KD`(速度增益) `MIROCFLY_KPP`(位置增益) `MIROCFLY_POSLEAK` `MIROCFLY_MAXDELTA` `MIROCFLY_ALPHA` `MIROCFLY_ALT_M` `MIROCFLY_SX/SY` `MIROCFLY_SECS`。
 

@@ -276,11 +276,21 @@ static int run_track(int fd, int req_w, int req_h, int frames)
 int main(int argc, char *argv[])
 {
 	const char *mode = argc > 1 ? argv[1] : "run";
-	int req_w = argc > 2 ? atoi(argv[2]) : 1280;
-	int req_h = argc > 3 ? atoi(argv[3]) : 720;
-	int frames = argc > 4 ? atoi(argv[4]) : 0;
-	const char *serial_dev = argc > 5 ? argv[5] : nullptr;
-	int baud = argc > 6 ? atoi(argv[6]) : 230400;
+	int req_w = 1280, req_h = 720, frames = 0;
+	const char *serial_dev = nullptr;
+	int baud = 230400;
+	if (strcmp(mode, "mon") == 0) {
+		/* mon: [mode] [serial_dev] [baud] (无需相机参数) */
+		serial_dev = argc > 2 ? argv[2] : nullptr;
+		baud = argc > 3 ? atoi(argv[3]) : 230400;
+	} else {
+		/* run/dry: [mode] [w] [h] [frames] [serial_dev] [baud] */
+		req_w = argc > 2 ? atoi(argv[2]) : 1280;
+		req_h = argc > 3 ? atoi(argv[3]) : 720;
+		frames = argc > 4 ? atoi(argv[4]) : 0;
+		serial_dev = argc > 5 ? argv[5] : nullptr;
+		baud = argc > 6 ? atoi(argv[6]) : 230400;
+	}
 	{ const char *s = getenv("MIROCFLY_SERIAL"); if (s) serial_dev = s; }
 	{ const char *s = getenv("MIROCFLY_SECS"); if (s) g_secs = atof(s); }
 	if (strcmp(mode, "dry") == 0) g_dry = 1;
