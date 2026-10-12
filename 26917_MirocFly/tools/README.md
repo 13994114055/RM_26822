@@ -8,7 +8,7 @@
 | `msp_probe.c` | LicheeRV（交叉编译） | **MSP 链路验证**：向 FC 的 MSP 口发 `STATUS/ATTITUDE/RAW_IMU` 请求并读响应，收到帧即 `LINK OK`。回环自测：板上短接 A16↔A17 应读到自身帧。 | 下位机对接阶段（原 `new_mcu/connection/`） |
 | `msp_live.py` | i5（本机 python3） | **MSP 实时监控**（经 FC USB VCP）：读 `ATTITUDE/RAW_IMU/MOTOR/RC` 并打印，用于拔桨方向自检/地面观察。 | 本会话（2026-10-10） |
 | `telem_mon.c` | LicheeRV（交叉编译） | **板上只读遥测**：读 FC `ATTITUDE/RAW_IMU`，**只发读请求、不发任何控制**（飞行时旁路监控）。 | 本会话（2026-10-10） |
-| `blackbox_decode.py` | i5（本机 python3） | **INAV blackbox v2 解码器**：解析 `.TXT` 日志 → 姿态/角速度/舵面(`axisP/I/D`)/电机/RC 轨迹 + 频谱/CSV，用于自稳/振荡/漂移/"翻-自旋"复盘。纯 stdlib。 | 本会话（2026-10-10） |
+| `blackbox_decode.py` | i5（本机 python3） | **INAV blackbox v2 解码器**：解析 `.TXT` 日志 → 姿态/角速度/舵面(`axisP/I/D`)/电机/**RC(`rcData`/`rcCommand`)**/**慢帧(`mspOverrideFlags`/`flightModeFlags`/`escRPM`)** 轨迹 + 频谱/CSV。用于自稳/振荡/漂移/接管/掉高度复盘。纯 stdlib。 | 本会话（2026-10-10，2026-10-12 补 rcData/慢帧） |
 
 ---
 
@@ -17,13 +17,19 @@
 ### blackbox_decode.py
 ```bash
 python3 blackbox_decode.py <log.TXT>                 # 默认输出帧数最多的一段: 概览+轨迹
-python3 blackbox_decode.py <log.TXT> --list          # 只列各段帧数
+python3 blackbox_decode.py <log.TXT> --list          # 只列各段 I/P 帧数
 python3 blackbox_decode.py <log.TXT> --index 0 --csv seg0.csv
 python3 blackbox_decode.py <log.TXT> --spectrum gyroADC[0]   # 主振荡频率
+# 字段时序(推荐复盘用): 0基段号, 可选时间窗/采样点
+python3 blackbox_decode.py <log.TXT> --index 13 --tmin 9.0 --npoints 60 \
+  --trace "rcData[3],rcData[0],rcData[1],rcCommand[0],rcCommand[1],attitude[0],attitude[1],surfaceRaw,motor[0],motor[1],motor[2],motor[3]"
+# 慢帧: 看 MSP 接管起止与模式/状态(mspOverrideFlags: bit1=接管, bit0=failsafe)
+python3 blackbox_decode.py <log.TXT> --index 13 --slow
 ```
-- 输出字段名与 blackbox 头 `Field I name` 一致（`loopIteration,time,axisRate[..],axisP[..],axisI[..],axisD[..],axisF[..],gyroADC[..],accSmooth[..],attitude[..],motor[..],rcCommand[..],...`）。
-- `attitude` 单位为 **0.1°**（打印时已 /10）；`gyroADC` 为原始单位。
-- 段 = 每次 `H Product:Blackbox` 重新开始（多次上电/arm 会是多段）。
+- 输出字段名与 blackbox 头 `Field I name` 一致。**`rcData`(FC 实际在用通道) 与 `rcCommand`(处理后指令) 已重建**（`TAG8_4S16`）；**慢帧 `S` 也已解**（`mspOverrideFlags` 等）。
+- `attitude` 单位为 **0.1°**（`summarize` 打印时已 /10，`--trace` 为原始值）；`gyroADC` 原始单位；`surfaceRaw` = 测距(高度)原始值；`vbat` 为 0.01V。
+- 段 = 每次 `H Product:Blackbox` 重新开始（多次上电/arm 会是多段）；慢帧挂在所属段内、不参与 I/P 计数。
+- **接管判据**：`--slow` 里 `override=1`（= `mspOverrideFlags` bit1）即上位机 MSP RC Override 生效。
 
 ### msp_live.py
 ```bash
