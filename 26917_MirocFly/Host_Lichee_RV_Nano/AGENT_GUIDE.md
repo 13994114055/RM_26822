@@ -40,6 +40,8 @@ LicheeRV Nano (SG2002) —— Linux视觉层: 采集→识别→目标选择→�
 - ✅ **scpcom 镜像 + scpcom 中间件可用**：板上 `/mnt/system/usr/bin/test_mmf 4` 出真实画面。注意：**scpcom 版 `_test_venc_jpg` 走相机**（`mmf_vi_frame_pop`），sipeed 版走合成彩条——别混淆。
 - ✅ **自写程序已出真图（Form A，2026-09-26 验证）**：`experiments/2026-09-26_03_scpcom_formA/` 首次验证，`experiments/2026-09-26_04_vision_module/` 固化。用 **scpcom 公有头**编译 + **链接板上 scpcom 库**（`LD_LIBRARY_PATH=/mnt/system/usr/lib:/mnt/system/usr/lib/3rd`，不部署自带 .so）。此前黑帧 = **中间件版本混用** + **抓到启动首帧** 两个问题叠加；现抓帧前丢前导帧（默认 10）。
 - ⚠️ 曾误判"`sensor_cfg.ini` 被改坏"：实测板上默认即 **beta**（`lane 4,3,2 / mclk1`），我们覆盖的内容 = beta，**并未改坏**。
+- **相机光学（GC4653 官方镜头）**：焦距 **3.05mm** / 光圈 F2.5 / **畸变 5%**；FOV **对角 90°、水平 81°、竖直 51°**（1/3" 传感器 2560×1440、2.0µm 像元；有效幅面 5.12×2.88mm）。换算：**1m 处约覆盖 1.6m×0.92m，2m 处 ~3.2m×1.85m**（近似，含 5% 桶形畸变 → 边缘"像素→角度"非线性）。
+  - **固定前视安装**建议：**pitch 下倾约 10–15°**（竖直 51° 很宽 → 对角度不敏感；巡航 1–1.5m 时覆盖 ~1.5m~∞）；yaw/roll = 0（光轴对齐机头、水平与机身齐）；**倒装(绕光轴180°)用 `MIROCFLY_CAM_ROT=180` 兜底**；垂直基准用 `pitch_bias_px` 标定（目标放"期望攻击方向"读 `sy` → 设 `pitch_bias_px=sy`）。**换装后必须重跑静态标定**（右→roll>1500、上→pitch>1500）。见 exp20。
 
 ## 4. 已确认的技术底座（勿重复造轮子）
 

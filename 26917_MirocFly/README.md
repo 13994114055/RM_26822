@@ -65,6 +65,7 @@ IDLE → ARM → TAKEOFF → SEEK(搜索目标) → APPROACH(接近撞击)
 - **RC 优先接管**：INAV 的 `MSP RC Override` 模式（固件自带 `BOX_MSP_RC_OVERRIDE` + `msp_override_channels`，**需在 CLI 配置、默认不覆盖**），遥控器拨杆（ch8）切换自主/手动，硬件级兜底。**⚠️ 掩码位序 = 内部通道号 AERT**（`ROLL=0 PITCH=1 YAW=2 THROTTLE=3`，非负载 AETR）：只接管三轴、油门留飞行员 = **`7`**（`11` 会误接管油门→切油）。
 - **边缘 AI**：YOLOv8n → INT8 量化 → TDL SDK 部署 SG2002 NPU（同芯片实测 ~17–27 FPS），HSV 仅调试/兜底。
 - **相机方案**：**用 scpcom 镜像 + scpcom 中间件**（官方镜像 GC4653 中间件坏；相机硬件本身正常）。自写程序必须**用 scpcom 的公有头编译、链接板上 scpcom 的库**，**不可混用 sipeed/官方中间件**（混用会导致取帧全黑）。
+  - **相机光学（GC4653 官方镜头）**：焦距 **3.05mm** / F2.5 / **畸变 5%** / FOV **对角 90°、水平 81°、竖直 51°**（1/3"，2560×1440，2.0µm）。固定前视装法：**pitch 下倾约 10–15°**（竖直 FOV 宽、对角度不敏感），**倒装用 `MIROCFLY_CAM_ROT=180`**，俯仰基准用 `pitch_bias_px` 标定。
 - **撞击检测**：近期上位机轮询 `MSP_RAW_IMU` 加速度突增；远期下位机 IMU 检测 + 状态机。
 - **返航**：无 GPS，指令死推算为主 + 光流位置辅助。
 
