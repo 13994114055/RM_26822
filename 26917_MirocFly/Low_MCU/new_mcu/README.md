@@ -86,7 +86,7 @@ new_mcu/
 
 > ✅ **2026-10-09 实测链路打通**（LicheeRV↔FC 收发声 OK）。要点：上位机用 **UART0/ttyS0（A16/A17）**（UART1 与板载 Wi-Fi/BT 共用不可用）；**波特率 230400**（FC UART2 上限）；**TX↔RX 交叉**；UART0 console getty 需先在 `/etc/inittab` 注释掉。详见 `connection/README.md`。
 
-- 策略：**保留物理 CRSF**（`receiver_type=SERIAL`）；上位机用 `MSP RC Override`（模式**永久 ID 50**）绑 **ch8**（`aux 3 50 3 1700 2100`）接管；**`msp_override_channels=7`**（只接管 roll/pitch/yaw，油门留飞行员）。**⚠️ 位序=AERT(内部通道号)，`11` 会误接管油门→切油**；详见 `AGENT_GUIDE.md` §6-18 与实验 18。
+- 策略：**保留物理 CRSF**（`receiver_type=SERIAL`）；上位机用 `MSP RC Override`（模式**永久 ID 50**）。**开关映射（2026-10-12 实验20 定稿）**：`ch5`=ARM；`ch6>1300 或 ch8>1300`=**接管三轴**（OR）；`ch8>900`=ANGLE；`msp_override_channels=7`（只接管 roll/pitch/yaw，油门留飞行员）。**⚠️ 位序=AERT(内部通道号)，`11` 会误接管油门→切油**；详见 `AGENT_GUIDE.md` §6-18 与实验 18/20。
 - MTF-02P 走 **MSP**：`opflow_hardware=MSP` + `rangefinder_hardware=MSP`（INAV 原生解析 `MSP2_SENSOR_OPTIC_FLOW`/`MSP2_SENSOR_RANGEFINDER`）。
 - ⚠️ **必须 `serial 0 0 ...` 清空 UART1**：INAV 限 **最多 3 个 MSP 端口**（`MAX_MSP_PORT_COUNT=3`），本板默认 VCP+UART1 已占 2 个；再加 UART2+UART4 会超限 → 启动时 serial 配置被**整体重置**（表现为"存不住"）。清空 UART1 后 MSP=VCP+UART2+UART4=3，合规。详见 `connection/README.md`。
 

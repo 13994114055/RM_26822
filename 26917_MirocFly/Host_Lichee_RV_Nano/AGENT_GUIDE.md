@@ -101,6 +101,8 @@ Host_Lichee_RV_Nano/
 - **`experiments/2026-09-29_12_armor_led/`（🟡传统CV装甲板 S0+S1）**：不依赖训练的**并行兜底/预研**。S0 `pc_tune/gen_synth_armor.py`（**纯 PIL** + 自解 8×8 单应）生成**透视梯形**合成图 21 张 + 真值 `synth_armor/labels.csv`；S1 `pc_tune/detect_armor.py`（**cv2**；PC 独立 venv `~/.venvs/mirocfly` 装 `opencv-python 5.0.0`，**与板端 opencv-mobile 5.0.0 对齐**）：通道差(`红=R−max(G,B)`/`蓝=B−max(R,G)`)→形态学→`minAreaRect`→同色**松弛配对**→**四点四边形对角线交点**为中心。合成集 **召回/精确 100%、中心误差 0.34px**。坑见 B16。S2 板端移植待做。
 - **闭环系列（台架, 2026-10-10）**：`experiments/2026-10-10_14_green_fly_smooth`（偏移 EMA 平滑+丢检滞回+FC 遥测回读）、`…/15_closedloop_overlay`（RTSP 上叠加 检测框/offset/RC/FC姿态）、`…/16_impact_detect`（`RAW_IMU` 加速度突增撞击，敲击实测峰值 5.35g）、`…/17_task_state_machine`（干跑状态机 IDLE→…→DONE + 视觉/IMU 撞击 + **相机 pitch 偏置参数 `pitch_bias_px`**）。
 - `experiments/2026-10-11_18_msp_takeover/`（🟡**上位机操控下位机**）：`takeover` 两模式——`track`（HSV 绿目标→EMA/滞回→roll/pitch→`SET_RAW_RC`，经 FC `MSP RC Override` 接管）+ `probe`（**方向自检**：脚本化发 roll±/pitch±，回读 `MSP_MOTOR`/`MSP_ATTITUDE`/`MSP_RC`，按相对 neutral 的 Δ 定符号/kp/是否真接管）。**纠正 INAV `msp_override_channels` 位序=AERT**：接管三轴=**7**（FC 已设 7 并 `save`）。**台架验证通过**：接管生效（`MSP_RC` 回读吻合）、油门不被覆盖、混控 Δ 与 `mmix` 一致、符号自洽；**开放问题：水平误差用 roll 还是 yaw（待定）**；真机待标定。
+- **`experiments/2026-10-12_19_opflow_hold/`（🟡光流水平阻尼）**：`flow_damp`——**新增 MSP v2 收发**（`msp2_send_request`/`msp_parser2_feed`，吃 v1+v2 帧；v2 帧 `$X` flags cmd(2) size(2) payload crc8_dvb_s2）+ `mon`（只读 `MSP2_INAV_OPTICAL_FLOW`(0x2001)/`MSP_SONAR_ALTITUDE`(58)）+ `damp`（光流估水平速度→roll/pitch 阻尼，依 FC `navigation_pos_estimator_flow.c` 约定：`v_右=+(flowX-bodyX)·(π/180)·alt`、`v_前=-(flowY-bodyY)·(...)`）。数据通路已验（`q≈40–60`，质量一般）。
+- **`experiments/2026-10-12_20_paradigm_select/`（🟡接管三轴+范式/定点/定高选择）**：`paradigm`——读 `MSP_RC` 取 ch6/ch7；`ovr=(ch6>1300)||(ch8>1300)`；`ch6>1300`→**范式B**（roll 追踪，`pitch_bias_px` 作垂直基准）；`ch7[1300,1700)`→**定点**（光流阻尼+位置积分，进入清零锚点+泄漏）、`[1700,2100)`→**定高（桩，需 mask=15）**；**接管期间始终叠加基础光流阻尼**。健壮性：`MIROCFLY_CAM_ROT=0|180`（相机倒装冗余，检测前 `cv::rotate`）、`alt` 无效值(0xFFFFFFFF/异常)回退兜底高度、光流无效时阻尼/积分归零。`mon`/`dry` 已验证（开关读值/模式判定/视觉符号自洽），**待台架真机**。预启动 `run/stop_paradigm.sh`。
 - **面试复盘**：`interview_notes.md`（按阶段 Q&A）+ `edge_ai_cheatsheet.md`（速查）。
 - **实验 01/02/03（旧/存档）**：低层 MMF、sipeed 链、Form A 首次实验，均不再作为正解。
 - `sensor_cfg.ini`：GC4653 **beta**（= 板默认）；由镜像 `/etc/init.d/S02config` 选 alpha/beta + 设 pinmux。
@@ -116,6 +118,6 @@ Host_Lichee_RV_Nano/
 5. NPU INT8 对自定义目标精度 → 保留 HSV 兜底。
 6. 撞击检测用 `MSP_RAW_IMU` 轮询（采样率受限）→ 与视觉"bbox 达阈值"联合判定。
 7. **定高/定点（ALTHOLD/POSHOLD）已确认跳过**：下位机**无板载气压计**（官方页 `Baro: —`）；INAV 的高度前提只认气压计/GPS，**光流+测距不算** → 本板不可用。如需：外接下位机 I2C1 气压计（BMP280/DPS310）。详见 `../Low_MCU/new_mcu/AGENT_GUIDE.md` §6-16。
-8. **已完成 `exp18` 骨架**：HSV 绿目标 → 操控下位机（MSP RC Override 接管；掩码=7）。**下一步**：① 台架 `probe`（压重物/绑绳）定死 roll/pitch 符号与 `kp`；② 真机 `track` 短飞（须 ANGLE + ch8）。相机若换带 pitch 角模具，只改 `pitch_bias_px` 并单点标定。视觉改 YOLO（阶段2）时本层只换检测源。
+8. **已到 `exp20`（接管三轴+范式/定点/定高选择）**：开关映射（ch5=ARM；`ch6>1300 或 ch8>1300`=接管(OR)；ch8>900=ANGLE；ch6→范式B；ch7→定点/定高）**已定稿并写入 FC**。**下一步**：① 台架（压重物/绑绳）验 B追踪/定点(光流)/基础阻尼、调 `kpvis/kd/kpp/sx/sy`；② 真机短飞（须 ANGLE + 接管开关）；③ 光流质量一般 → 换纹理地面/亮光/标定 `opflow_scale`；④ 上位机测距**定高（O3，接管油门 mask=15）**以支撑"巡航保持 1–1.5m"。相机固定前视：**pitch 下倾 ~10–15°**、倒装用 `CAM_ROT=180`、换装后重跑静态标定并标 `pitch_bias_px`。视觉改 YOLO（阶段2）时本层只换检测源。
 
 > 维护提醒：每次推进/方案变更，同步更新本文件 + 根 `README.md` / `agent.md` + `difficulty_and_method.md`。

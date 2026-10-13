@@ -51,7 +51,7 @@ LicheeRV Nano (SG2002) 上位机 —— Linux视觉层: 采集→识别→目标
 | 阶段 | 内容 | 状态 | 下一步 |
 |---|---|---|---|
 | 0 相机出帧 | 交叉编译 + CSI 抓帧 | 🟢 **`experiments/…/04_vision_module` Form A 出真图**；`05_rtsp_stream` RTSP 预览打通（B7/B9/B11 已解） | 阶段 1（HSV）或 MSP 链路 |
-| 1 绿色荧光 | HSV → 视觉→控制闭环（INAV） | 🟢 **台架闭环全通**：检测(06)+链路(07)+打磨(14 EMA/丢检滞回/FC遥测)+可视化(15 RTSP叠加)+撞击(16 IMU)+状态机干跑(17)+**操控下位机(18 MSP RC Override)** | 台架 `probe` 定 kp/符号 → 真机 `track` 短飞（ANGLE+ch8） |
+| 1 绿色荧光 | HSV → 视觉→控制闭环（INAV） | 🟢 **台架/板端全通**：检测(06)+链路(07)+打磨(14 EMA/丢检滞回/FC遥测)+可视化(15 RTSP叠加)+撞击(16 IMU)+状态机干跑(17)+**操控下位机(18 MSP RC Override)**+**光流阻尼(19)**+**接管三轴/范式选择(20)** | 台架（压重物/绑绳）验 B追踪/定点/阻尼 → 真机短飞；光流质量一般待改善；定高(O3)需接管油门 |
 | 2 不规则物体 | YOLOv8n NPU 部署 → 撞击 → 30s 返航 | 🟡 **部署(09/10)+量化(11)已通**；自训装甲模型待 4060 | 训练+导出 → 量化 → 部署 |
 | 3 自写固件 | 下位机自研飞控 | ⏳ 远期 | 新主控 G473 已重购、INAV G4 能飞；待上位机对接后推进 |
 
@@ -61,7 +61,7 @@ LicheeRV Nano (SG2002) 上位机 —— Linux视觉层: 采集→识别→目标
 - **镜像 = scpcom 构建**（`/boot/ver`≈`6f9596`，内核 `2026-07-14`，中间件 `libsys 87be70b`）；源码树已克隆至 `LicheeSG-Nano-Build_scpcom/`（`scpcom/LicheeSG-Nano-Build`，sophgo weekly 2024.10.14 中间件）。
 - 板上 `test_mmf`（scpcom 编）取**相机**帧 → 真图；**自写程序 `experiments/…/03_scpcom_formA`（Form A）也已出真图**（黑帧根因 = 中间件版本混用 + 抓启动首帧，均已在 `04_vision_module` 解决）。注：scpcom 版 `test_mmf 4` 走**相机**（`_test_venc_jpg` 用 `mmf_vi_frame_pop`），sipeed 版的才是合成彩条图。
 - 默认 sensor 配置 = **beta**（`lane_id=4,3,2 / mclk=1 / bus4 / i2c 0x29`），由镜像 `/etc/init.d/S02config` 决定：无 `/boot/alpha|epsilon` → beta + pinmux（`devmem 0x0300116C=0x3, 0x0300118C=0x5`）。**我们的 `sensor_cfg.ini` 内容 = beta，并未改坏配置**。
-- **实验档案制**（每次尝试一个目录，索引 `Host_Lichee_RV_Nano/experiments/README.md`）：01 低层MMF / 02 sipeed链 / 03 FormA首验 / 04 相机层 / 05 RTSP / 06 绿色检测 / 07 MSP 链路 / 08 识别绿色并飞向(闭环) / 09 NPU 部署(底层 cviruntime + 高层 TDL 检测) / 10 TDL 推理层(相机+检测+画框+RTSP) / 11 TPU-MLIR 量化(ONNX→cv181x INT8 cvimodel)。
+- **实验档案制**（每次尝试一个目录，索引 `Host_Lichee_RV_Nano/experiments/README.md`）：01 低层MMF / 02 sipeed链 / 03 FormA首验 / 04 相机层 / 05 RTSP / 06 绿色检测 / 07 MSP 链路 / 08 识别绿色并飞向(闭环) / 09 NPU 部署 / 10 TDL 推理层 / 11 TPU-MLIR 量化 / 12 传统CV装甲板(PC) / 13 YOLOv8n 量化 / 14 闭环打磨(EMA/滞回/FC遥测) / 15 RTSP叠加 / 16 IMU撞击 / 17 状态机干跑 / **18 操控下位机(MSP RC Override)** / **19 光流水平阻尼** / **20 接管三轴+范式/定点/定高选择**。
 - `experiments/2026-09-26_04_vision_module/`（✅相机层）：Form A——`camera.h` API + `frame_grab` CLI；编译 scpcom `maix_mmf/sophgo_middleware.c`，链接 `Host_Lichee_RV_Nano/board_libs/`（`fetch_board_libs.sh` 拉取，**不进板**；`-lsample` 等，**必须 `-lgdc`**）；`mf_camera_warmup(10)` 丢前导帧。
 - `experiments/2026-09-26_05_rtsp_stream/`（✅RTSP）：VI→VENC(H265)→RTSP；复用 scpcom `rtsp_server/`+`media_server` 静态库；**必须显式绑 IP**（`RTSP_IP=10.222.2.1`，否则绑到 wlan0，见 B11）；仅 H265；退出用 SIGTERM 勿 `kill -9`。
 - `experiments/2026-09-26_06_hsv_green/`（✅绿色检测）：opencv-mobile HSV；阈值 PIL H85-130/S40-170/V55-170 = OpenCV H60-91/S40-170/V55-170；轮廓函数在 **geometry** 模块(`-lopencv_geometry`)；无 imgcodecs 故**直接写 BMP**；小目标 `min_area=20`。
@@ -75,10 +75,12 @@ LicheeRV Nano (SG2002) 上位机 —— Linux视觉层: 采集→识别→目标
 - 面试复盘文档 `Host_Lichee_RV_Nano/interview_notes.md`（按项目阶段组织的 Q&A）；知识点速查 `edge_ai_cheatsheet.md`。
 - **闭环系列（台架，2026-10-10）**：`14_green_fly_smooth`（EMA 平滑+丢检滞回+FC 遥测回读）、`15_closedloop_overlay`（RTSP 上叠加 检测框/offset/RC/FC姿态）、`16_impact_detect`（`RAW_IMU` 加速度突增撞击，敲击实测峰值 5.35g）、`17_task_state_machine`（干跑状态机 IDLE→…→DONE，视觉/IMU 撞击，**相机 pitch 偏置参数**）。
 - **`experiments/2026-10-11_18_msp_takeover/`（🟡上位机操控下位机）**：`takeover` 两模式——`track`（HSV 绿目标→EMA/滞回→roll/pitch→`SET_RAW_RC`，经 FC `MSP RC Override` 接管）+ `probe`（方向自检：发 roll±/pitch±，回读 `MSP_MOTOR`/`ATTITUDE`/`MSP_RC` 定符号/kp/是否真接管）。**纠正 `msp_override_channels` 位序=AERT**：只接管三轴=**7**（FC 已设 7 并 `save`）。**台架验证通过**（接管生效/油门不被覆盖/混控 Δ 与 `mmix` 一致/符号自洽）；**开放问题：水平误差用 roll 还是 yaw（待定）**；真机待标定。
+- **`experiments/2026-10-12_19_opflow_hold/`（🟡光流水平阻尼）**：`flow_damp`——新增 **MSP v2** 收发（`msp2_send_request`/`msp_parser2_feed`，吃 v1+v2 帧）+ `mon`（只读光流 `MSP2_INAV_OPTICAL_FLOW` 0x2001 / 测距 `MSP_SONAR_ALTITUDE` 58）+ `damp`（光流估水平速度→roll/pitch 阻尼，依 FC `navigation_pos_estimator_flow.c` 约定）。数据通路已验（`q≈40–60`）。预启动脚本 `run/stop_flowdamp.sh`。
+- **`experiments/2026-10-12_20_paradigm_select/`（🟡接管三轴+范式选择）**：`paradigm`——读 `MSP_RC` 取 ch6/ch7；`ovr=(ch6>1300)||(ch8>1300)`；`ch6>1300`→范式B（roll 追踪, `pitch_bias_px` 基准）；`ch7[1300,1700)`→定点（光流阻尼+位置积分）、`[1700,2100)`→定高（**桩**，需 mask=15）；**接管期间始终叠加基础光流阻尼**；`MIROCFLY_CAM_ROT=0|180`（相机倒装冗余）、`alt` 无效值回退。`mon`/`dry` 已验证开关/模式/符号；**待台架真机**。预启动 `run/stop_paradigm.sh`。
 
 **下位机** `Low_MCU/`
 - AT32 方案**已冻结**（`archive_at32/agent_at32.md`）。
-- 新主控 = **BetaFPV G473（STM32G474）**，与烧毁的同款**已重购**；**自研移植 INAV 10.0.0（STM32G4）当前能飞**；**本土化已落地**（上位机 MSP UART2@230400 链路已打通；CRSF/光流接口已配）。**2026-10-10 解决"离地即翻/自旋"**（根因＝**电机输出编号与物理接线错位**；修复：mixer 轮换版 + `motor_direction_inverted=OFF` + `align_board_roll=1800`）。工作区 `new_mcu/drone/`，详见 `new_mcu/README.md` 与 `new_mcu/AGENT_GUIDE.md`。
+- 新主控 = **BetaFPV G473（STM32G474）**，与烧毁的同款**已重购**；**自研移植 INAV 10.0.0（STM32G4）当前能飞**；**本土化已落地**（上位机 MSP UART2@230400 链路已打通；CRSF/光流接口已配）。**2026-10-10 解决"离地即翻/自旋"**（根因＝**电机输出编号与物理接线错位**；修复：mixer 轮换版 + `motor_direction_inverted=OFF` + `align_board_roll=1800`）。工作区 `new_mcu/drone/`，详见 `new_mcu/README.md` 与 `new_mcu/AGENT_GUIDE.md`。**开关映射（2026-10-12 定稿）**：`ch5`=ARM；`ch6>1300 或 ch8>1300`=MSP RC OVERRIDE（OR）；`ch8>900`=ANGLE；`ch6`=范式(当前全 B)；`ch7[1300,1700)`=定点/`[1700,2100)`=定高；`msp_override_channels=7`（CLI dump 见 `new_mcu/drone/config/g473_msprc.txt`）。
 
 ## 6. 技术要点速查
 
@@ -106,6 +108,6 @@ LicheeRV Nano (SG2002) 上位机 —— Linux视觉层: 采集→识别→目标
 2. ION 泄漏：Form A/RTSP 正常退出（SIGTERM）可回收（实测 used=0）；**`kill -9` 会泄漏**，需干净重启；程序清理路径在异常分支仍待加固。
 3. **不需要**构建 scpcom 的 kernel/middleware（app 只要公有头 + 板上库）。
 4. NPU INT8 对自定义目标精度（HSV 兜底）；**缺 TDL SDK**。
-5. 下位机 G473：**上位机 MSP 链路已打通**（2026-10-10 复测 `LINK OK`）；**"翻/自旋"已解决（电机编号错位）**；**已插 1S 电池、电压采样已修**（`vbat_scale` 110→1100，`3.95V OK`）。**上位机操控下位机（exp18）台架验证通过**：`MSP RC Override` 接管生效、**掩码=7**（只接管 roll/pitch/yaw；位序 AERT，`11` 会误接管油门→切油）、混控 Δ 与 `mmix` 一致、符号自洽。**下一步：先定"水平误差 roll vs yaw" → 真机 `track` 短飞标 kp/相机朝向**。**光流 MTF-02P 已在线**（`OPFLOW/RANGEFINDER=OK`）待标定。
+5. 下位机 G473：**上位机 MSP 链路已打通**（复测 `LINK OK`）；**"翻/自旋"已解决（电机编号错位）**；**电压采样已修**（`vbat_scale` 110→1100）。**开关映射已定稿（2026-10-12）并写入 FC**：`ch5`=ARM；`ch6>1300 或 ch8>1300`=**MSP RC OVERRIDE**（同 modeId 两条 aux = OR）；`ch8>900`=ANGLE；`msp_override_channels=7`（只接管 roll/pitch/yaw；位序 **AERT**，`11` 会误接管油门→切油）。**exp18/20 台架+`mon`/`dry` 验证通过**（接管生效、开关读值/模式判定正确、视觉符号自洽）。**光流 MTF-02P 已在线**（`OPFLOW/RANGEFINDER=OK`，`q≈40–60`）**质量一般**。**下一步：台架（压重物/绑绳）验 B追踪/定点/阻尼 → 真机短飞**。**FC 用完 `fccli` 必须 `exit`/`save` + 等 ~15–20s**（否则 UART2 MSP `NO RESPONSE`）。
 6. 撞击检测采样率受限 → 与视觉联合判定。
 7. **定高/定点（ALTHOLD/POSHOLD）**：本板**无板载气压计**（官方页 `Baro: —`；INAV `BARO=UNAVAILABLE`，`baro_hardware` AUTO 会被写回 NONE）。INAV 的高度前提 `navReadyAltControl` **只认气压计/GPS**，**光流+激光测距不算** → **已确认跳过**。若将来要做：外接 **BMP280/DPS310 到 I2C1**（PA15/PB7），再 `baro_hardware=AUTO` + `inav_allow_dead_reckoning=ON` 即可无 GPS 定高/光流定点。

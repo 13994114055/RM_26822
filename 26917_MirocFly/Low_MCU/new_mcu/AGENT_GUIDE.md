@@ -40,7 +40,7 @@
 
 - **项目**：MirocFly — 面向"自主视觉打击"的小型无人机。上位机（LicheeRV Nano，SG2002）负责摄像头推理、目标决策；下位机（飞控）负责姿态稳定与执行。
 - **接口抽象**：上位机给下位机下发 `TargetInfo{ 偏移X, 偏移Y, 面积Area(∝1/距离²), 状态Status }`；链路层只换编码器（近期用 **MSP 摇杆值**，远期换自定义帧 `AA 55 | X | Y | Area | Status | CRC8`）。
-- **RC 优先**：物理 CRSF 直连为准，**ch8 拨杆**切换自主/手动（`MSP RC Override`，模式**永久 ID 50**）；上位机停发则回落到物理 RC。
+- **RC 优先**：物理 CRSF 直连为准，**拨杆切换自主/手动**（`MSP RC Override`，模式**永久 ID 50**）；上位机停发则回落到物理 RC。**开关映射（2026-10-12 定稿，实验20）**：`ch5`=ARM；**`ch6>1300 或 ch8>1300`=上位机接管三轴**（同 modeId 挂两条 aux = **OR**）；`ch8>900`=ANGLE；`ch6`=追踪范式（全 B）；`ch7[1300,1700)`=定点 / `[1700,2100)`=定高。
 
 ---
 
@@ -121,7 +121,7 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
 - 要点：**UART1(ttyS1) 与板载 Wi-Fi/BT(AIC8800) 共用引脚，不可用**；**UART0 需先释放 console getty**（板内 `/etc/inittab` 注释相应行）。
 - ⚠️ **必须 `serial 0 0 ...` 清空 UART1**：INAV 限 **最多 3 个 MSP 端口**（`MAX_MSP_PORT_COUNT=3`）；默认 VCP+UART1 已占 2，再加 UART2+UART4 会超限 → 启动时 serial 配置被**整体重置**（表现为"存不住"）。
 - MTF-02P 走 **MSP**：`opflow_hardware=MSP` + `rangefinder_hardware=MSP`（INAV 原生解析 `MSP2_SENSOR_OPTIC_FLOW`/`MSP2_SENSOR_RANGEFINDER`）。
-- 策略：保留物理 CRSF；上位机 `MSP RC Override`（永久 ID 50）绑 ch8（`aux 3 50 3 1700 2100`），**`msp_override_channels=7`**（只接管 roll/pitch/yaw，油门留飞行员）。**⚠️ 掩码位序 = 内部通道号 AERT（`ROLL=0 PITCH=1 YAW=2 THROTTLE=3`），非负载 AETR；`11` 会误接管油门→切油**。`failsafe_procedure`：配置稿=DROP，**实测板载=LAND**（待统一）。
+- 策略：保留物理 CRSF；上位机 `MSP RC Override`（永久 ID 50）。**2026-10-12（实验20）改 aux**：`ch5`=ARM(`aux 0 0 0 1775 2100`)；`ch6>1300`→override(`aux 1 50 1 1300 2100`)；`ch8>1300`→override(`aux 2 50 3 1300 2100`，与上条 **OR**)；`ch8>900`→ANGLE(`aux 3 1 3 900 2100`，注：800 被 INAV 下限钳到 900)；**删 HORIZON**。**`msp_override_channels=7`**（只接管 roll/pitch/yaw，油门留飞行员）。**⚠️ 掩码位序 = 内部通道号 AERT（`ROLL=0 PITCH=1 YAW=2 THROTTLE=3`），非负载 AETR；`11` 会误接管油门→切油**。`failsafe_procedure`：配置稿=DROP，**实测板载=LAND**（待统一）。配置见 `drone/config/g473_msprc.txt`。
 
 ---
 
@@ -134,6 +134,7 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
 - UART1/ttyS1 与 AIC8800 冲突诊断；释放 UART0 console。
 - ✅ **"离地即翻/自旋"根因（2026-10-10）**：**电机输出编号 M1–M4 与物理接线错位**（飞控倒装 180° 重装后未重映射）→ 姿态修正发给了错误电机 → 发散（翻/自旋）。**修复**：mixer 改成匹配真实编号的"180° 轮换"版 + `motor_direction_inverted=OFF` + `align_board_roll=1800`（倒装仅靠它补传感器朝向）。**现能起飞、不再自旋**。排查法见 §5.5；基线 dump：`drone/firmware/INAV_10.0.0_cli_20261010_dirfix.txt`。
 - ✅ **上位机操控下位机（2026-10-11, 实验18）**：上位机 `takeover`（HSV 绿目标→roll/pitch→`MSP_SET_RAW_RC`）经 `MSP RC Override` 接管。**纠正 `msp_override_channels` 位序坑**（见 §6）→ 改 `7` 并 `save`（`get = 7` 已确认）。**台架验证通过**：接管生效（上位机用 `MSP_RC` 回读我方发送值吻合）、**油门未被覆盖**（mask=7）、**混控 Δ 与实测 `mmix` 一致**、符号自洽。实测：`mmix`=M1:+roll+pitch / M2:+roll-pitch / M3:-roll+pitch / M4:-roll-pitch；`align_board_roll=1800`、`motor_direction_inverted=OFF`、`min_check=1100`（油门需 >1100 才出混控）、AIRMODE 已启用。真机待标定 kp/符号（另有开放问题：水平误差 roll vs yaw，见上位机实验18）。
+- ✅ **接管三轴+范式/定点/定高选择（2026-10-12, 实验20）**：上位机 `paradigm` 读 `MSP_RC` 判 `ovr=(ch6>1300)||(ch8>1300)`，`ch6>1300`→范式B、`ch7`→定点/定高；**aux 已按上表改并 `save`**（`aux 0/1/2/3` 已核）。上位机 `mon`/`dry` 已验证（开关读值/模式判定/视觉符号）。**光流 MTF-02P**：`OPFLOW/RANGEFINDER=OK`，上位机经 MSP v2 读，`q≈40–60`（质量一般）。**下一步**：台架验 B追踪/定点/阻尼。
 
 ### 5.2 ✅ EzTune 关闭 + INAV 默认 PID（Plan A）
 - **背景**：INAV 的 **EzTune** 特性在开启时会**覆盖** `mc_p/i/d`（每次启动重算）；此前 `ez_enabled=ON`（`ez_response≈92`），导致 PID 不受手动配置控制。
@@ -148,7 +149,7 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
    - 本机已具备**自写 INAV blackbox v2 解码器**（直接读 `~/Downloads/blackbox_log_*.TXT`，出 `roll/pitch/yaw`、`gyroADC`、`motor`）：无需 `blackbox_decode`。
    - 已分析：`blackbox_log_2026-10-10_152838/160315/162041/164110.TXT` → 旧配置下是**方向类错误（翻/自旋）**，**并非 PID 振荡**；也印证"先修方向、再谈 PID"。
    - 待办：短悬停取新日志 → 看 `gyroADC/axisP/axisD/motor` 的振荡频率/幅度 → 给 P/D/滤波建议。
-4. **MTF-02P 光流/测距未验证**：目标 POSHOLD/ALTHOLD（RTH 不用光流）。测距**误差 4–5cm**（规格：<2m 时 2cm、>2m 时 1.5%），原因待查。光流需在 INAV `status` 确认 `OPFLOW`/`RANGEFINDER` 就绪，或 `debug_mode=FLOW`。
+4. **MTF-02P 光流/测距（已在线）**：FC `status` 显示 `OPFLOW/RANGEFINDER=OK`；上位机经 **MSP v2** 读（`MSP2_INAV_OPTICAL_FLOW`/`MSP_SONAR_ALTITUDE`），实测 `q≈40–60`（**质量一般**，疑地面纹理/光照不足）。**规格**：光流**最小工作距离 8cm**、环境光 **>60Lux**、视场 42°、1m 处最大测速 7m/s、50Hz；测距 **0.02–6m（精度 2cm）**。→ 飞行高度须 **≥8cm**；质量差就换纹理地面/亮光，并标定 `opflow_scale`(内置 `MSP2_INAV_OPFLOW_CALIBRATION` 0x2032/手转30s)、`align_opflow`。手册：https://micoair.cn/zh/docs/sensors/sensors/mtf-02-02p-sensors
    - 手册：https://micoair.cn/zh/docs/sensors/sensors/mtf-02-02p-sensors
 
 ### 5.4 待办阶梯
@@ -200,7 +201,7 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
 15. **电压采样（自制 target）**：`target.h` 的 `VBAT_SCALE_DEFAULT` 曾误设 **110**（=1.1:1），本板实际分压为 **11:1** → 电压只显示 ~0.4V（1S 电池）。正确值 **1100**（2026-10-10 修正源码 + 板上 `set vbat_scale = 1100` 已 `save` 持久化，重启后 `status` 显示 ~4V）。**自制 target 首次上电务必核对 `vbat_scale`/`current_meter_scale`。**
 16. **板载无气压计 → `ALTHOLD`/`POSHOLD` 不可用**：INAV 的高度控制前提 `navReadyAltControl` **只认气压计或 GPS**（`fc_msp_box.c:232`），**光流/激光测距都不算**（测距只在"已有 baro"后用于表面跟随/加权）。`baro_hardware=AUTO` 若开机没检测到，会被自动写回 `NONE`（`sensors/initialisation.c:87`）。本板（BetaFPV Air G4/G473）官方页标注 `Baro: —`。**想无 GPS 用光流定点 → 需外接气压计（BMP280/DPS310 到 I2C1：PA15=SCL/PB7=SDA）**；否则跳过。
 17. **串口设 GPS 但无 GPS 模块 → 无效**；且**别动 UART2=上位机 MSP**（会破坏链路）。本板 UART 已排满（UART1 仅RX / UART2 上位机MSP / UART3 CRSF / UART4 光流MSP）。
-18. **`msp_override_channels` 位序 = AERT（内部通道号），不是 AETR**：INAV 内部 `ROLL=0 PITCH=1 YAW=2 THROTTLE=3`（`fc/rc_controls.h`），掩码 `1<<channel`（`rx/msp_override.c:269`）；而 `SET_RAW_RC` 的**负载**顺序才是 AETR（`rcmap={0,1,3,2}`）。故"只接管三轴、油门留飞行员"= **`7`(0111)**；**`11`(1011) 会接管 roll/pitch/throttle 而放开 yaw → payload 油门(1000) 覆盖物理油门 → 空中切油**。Betaflight 掩码则是 AETR（bit2=throttle），**两家不一致，别照搬**。可用上位机实验18 `probe`/`MSP_ACTIVEBOXES`(bit41) 确认是否真接管。
+18. **`msp_override_channels` 位序 = AERT（内部通道号），不是 AETR**：INAV 内部 `ROLL=0 PITCH=1 YAW=2 THROTTLE=3`（`fc/rc_controls.h`），掩码 `1<<channel`（`rx/msp_override.c:269`）；而 `SET_RAW_RC` 的**负载**顺序才是 AETR（`rcmap={0,1,3,2}`）。故"只接管三轴、油门留飞行员"= **`7`(0111)**；**`11`(1011) 会接管 roll/pitch/throttle 而放开 yaw → payload 油门(1000) 覆盖物理油门 → 空中切油**。Betaflight 掩码则是 AETR（bit2=throttle），**两家不一致，别照搬**。可用上位机实验18/20 `probe`/`MSP_RC`(105, 回读 override **之后**的通道) 确认是否真接管（**别用 `MSP_ACTIVEBOXES` 位掩码**：INAV 按"下发顺序"打包，非 box 枚举号）。
 
 ---
 
