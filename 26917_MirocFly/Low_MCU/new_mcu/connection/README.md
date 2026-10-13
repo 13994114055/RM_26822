@@ -50,7 +50,7 @@ UART3：CRSF 接收机接 G473 UART3
 - `serial 2 64 ...`（UART3 = 串口接收机 CRSF）+ `set receiver_type = SERIAL`、`set serialrx_provider = CRSF`
 - `serial 3 1 115200 ...`（UART4 = MSP，给 MTF-02P）
 - `set msp_override_channels = 7`（只接管 roll/pitch/yaw，油门留飞行员）—— **⚠️ 位序 = 内部通道号 AERT（`ROLL=0 PITCH=1 YAW=2 THROTTLE=3`），不是负载的 AETR**；`15`=全接管，`11`(1011) 会**误接管油门**（payload 油门覆盖物理油门→切油）。源码 `rx/msp_override.c` + `fc/rc_controls.h`。见实验 18
-- `aux 0 50 3 1700 2100`（见下）
+- **aux（2026-10-12 实验20 定稿）**：`aux 0 0 0 1775 2100`（ch5=ARM）；`aux 1 50 1 1300 2100`（ch6>1300=接管）；`aux 2 50 3 1300 2100`（ch8>1300=接管，**与上条 OR**）；`aux 3 1 3 900 2100`（ch8>900=ANGLE）；**删 HORIZON**。（上位机读 ch6=范式、ch7=定点[1300,1700)/定高[1700,2100)。）
 - `set opflow_hardware = MSP`、`set rangefinder_hardware = MSP`
 - `set failsafe_procedure = DROP`
 

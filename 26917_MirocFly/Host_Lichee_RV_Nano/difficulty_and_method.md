@@ -158,6 +158,12 @@
 - **解决**：FC `set msp_override_channels = 7` + `save`。**判"是否真接管"要回读 `MSP_RC`(105，返回 override 之后的通道)**：我们发 roll=1700 时若 FC 的 roll≈1700 → 接管生效。（**别用 `MSP_ACTIVEBOXES` 的 `bit41` 判**：INAV `packBoxModeFlags()` 按"下发顺序的索引"打包，非 box 枚举号，只有 `bit0=BOXARM` 恰好可靠。）再用 `MSP_MOTOR`/`MSP_ATTITUDE` 的"相对 neutral Δ"定 roll/pitch 符号与 `kp`。真机另需注意：油门须 > `min_check`(1100) 才出混控；ch8 须落 `[1700,2100)`。
 - **教训**：跨固件（BF/INAV）的"同名配置"必须回**运行的这份源码**核对，别信直觉/别信另一家的文档。
 
+### B18. 上位机（LicheeRV）USB-RNDIS 反复掉线 → ssh/部署中断（实验18–20 期间反复踩）
+- **现象**：LicheeRV 的 USB 网络（RNDIS，`ssh root@10.222.x.1`）"一会儿能连一会儿断"；主机 `enp0s20*` 网卡时有时无；`ssh/scp` 频繁超时。
+- **根因（内核日志）**：`licheervnano (359f:2120)` 挂在 **USB Hub（`usb 1-3.2`）**上，注册后 ~40s 就 `USB disconnect`，再枚举时常 `unable to read config index 0 descriptor / error -71 (EPROTO)`、`attempt power cycle`。同 Hub 上的鼠标也在掉 → **是 Hub/供电/线的问题，不是软件**。
+- **解决**：**去掉 Hub，直插主机后置 USB 口 + 用能传数据的短线 + 稳定 5V 供电**（欠压会让 gadget 枚举失败/复位）。判定：`lsusb | grep 359f`（设备认到否）、`ip -br addr | grep enp0s`（网卡起来否）、`journalctl -k`（有无 `error -71`/`disconnect`）。
+- **另一个高频坑（连上却也"不通"）**：`fccli.py` 会进 **INAV CLI**；**CLI 模式下 FC 的 UART2 MSP 不响应**（`msp_probe`/`paradigm mon` 全 0 或 `NO RESPONSE`）。→ 用完 `fccli` 必须 **`exit`/`save` 并等 ~15–20s** 再测链路。
+
 ---
 
 ## C. 内存 / ION 认知（由困难衍生）
