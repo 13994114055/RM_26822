@@ -84,6 +84,7 @@ IDLE → ARM → TAKEOFF → SEEK(搜索目标) → APPROACH(接近撞击)
 
 ## 文档导航
 
+- **`commands.md`** — **常用命令速查**（板子在不在线 / 跑某功能 / FC 配置 / 黑匣子解码等，基础命令自己查）
 - `Host_Lichee_RV_Nano/README.md` — **上位机目录总览**（项目角色 + 文件夹说明）
 - `Host_Lichee_RV_Nano/experiments/README.md` — **上位机实验档案索引**（01~20，每次尝试一个目录）
 - `Host_Lichee_RV_Nano/AGENT_GUIDE.md` — 上位机开发指导（持续更新）
