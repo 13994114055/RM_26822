@@ -84,10 +84,11 @@ LicheeRV Nano (SG2002) 上位机 —— Linux视觉层: 采集→识别→目标
 
 - MSP：`MSP_SET_RAW_RC`(200,≥5Hz)、`MSP_RAW_IMU`(102)、`MSP_ATTITUDE`(108)、`MSP_RX_MAP`、`MSP2_INAV_STATUS`、`MSP2_INAV_ESTIMATED_POSITION`；`MSP RC Override` 掩码 `msp_override_channels`。
 - 相机：CVI MMF(VI→ISP→VPSS→VENC)；**编译须用 scpcom 公有头 + 链接板上 scpcom 库**（`/mnt/system/usr/lib` + `/3rd`；另需 `-lgdc`）；抓帧先丢前导帧；sensor_cfg GC4653 beta（lane 4,3,2, mclk1；S02config 决定）；ION/carveout 媒体预留 ~128MB（Form A 正常退出可回收，实测 used=0；异常后仍建议干净重启）。
+- **相机光学（GC4653，官方镜头）**：焦距 **3.05mm** / 光圈 F2.5 / **畸变 5%**；FOV **对角 90°、水平 81°、竖直 51°**（1/3" 传感器，2560×1440，2.0µm；有效幅面 5.12×2.88mm）。换算：**1m 处约覆盖 1.6m×0.92m，2m 处 ~3.2m×1.85m**（近似，含畸变）。**固定前视时竖直 51° 很宽 → pitch 不敏感**：巡航 1–1.5m 时**下倾 ~10–15°** 可覆盖 ~1.5m~∞；倒装用 `MIROCFLY_CAM_ROT=180`（exp20）、俯仰基准用 `pitch_bias_px` 标定（标法见 `Host…/experiments/2026-10-12_20_paradigm_select/README.md`）。
 - RTSP：`experiments/2026-09-26_05_rtsp_stream/`（VI→VENC H265→`rtsp_send_memory_data`）；`rtsp_server_init` **须显式绑 IP**（`RTSP_IP=10.222.2.1`，否则自动绑 wlan0 → USB 连不上，B11）；scpcom 未开放 h264 init；退出 SIGTERM 勿 `kill -9`（否则 ION 泄漏）。
 - 绿色检测：opencv-mobile(OpenCV5)。**HSV 标度**：PIL H0-255 vs OpenCV H0-179（`Hcv=Hpil*179/255`）；`findContours/contourArea/moments` 在 **geometry** 模块（`#include <opencv2/geometry.hpp>` + `-lopencv_geometry`）；**无 imgcodecs** → 写 BMP；小目标 `min_area` 要小（B12）。
 - NPU：SG2002 代号 cv181x，仅 INT8/BF16；转换链 PyTorch→ONNX→MLIR→INT8 cvimodel；参考 ret7020 YoloCamera 与 MilkV Duo TDL 文档。
-- 光流 MTF-02P 协议与 INAV 兼容性未知。
+- 光流+测距 **MTF-02P**（下视，走 MSP）：**已实测可用**（FC `status` `OPFLOW/RANGEFINDER=OK`；上位机读 `MSP2_INAV_OPTICAL_FLOW`(0x2001)/`MSP_SONAR_ALTITUDE`(58)，`q≈40–60`）。关键规格：**光流最小工作距离 8cm**、环境光 **>60Lux**、光流视场 42°、1m 处最大测速 7m/s、数据 50Hz；**测距 0.02–6m（精度 2cm）**。→ 飞行高度需 **≥8cm**（建议 0.2–0.5m）。
 
 ## 7. 给后续 Agent 的要求
 
