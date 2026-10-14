@@ -80,7 +80,7 @@ LicheeRV Nano (SG2002) 上位机 —— Linux视觉层: 采集→识别→目标
 
 **下位机** `Low_MCU/`
 - AT32 方案**已冻结**（`archive_at32/agent_at32.md`）。
-- 新主控 = **BetaFPV G473（STM32G474）**，与烧毁的同款**已重购**；**自研移植 INAV 10.0.0（STM32G4）当前能飞**；**本土化已落地**（上位机 MSP UART2@230400 链路已打通；CRSF/光流接口已配）。**2026-10-10 解决"离地即翻/自旋"**（根因＝**电机输出编号与物理接线错位**；修复：mixer 轮换版 + `motor_direction_inverted=OFF` + `align_board_roll=1800`）。工作区 `new_mcu/drone/`，详见 `new_mcu/README.md` 与 `new_mcu/AGENT_GUIDE.md`。**开关映射（2026-10-12 定稿）**：`ch5`=ARM；`ch6>1300 或 ch8>1300`=MSP RC OVERRIDE（OR）；`ch8>900`=ANGLE；`ch6`=范式(当前全 B)；`ch7[1300,1700)`=定点/`[1700,2100)`=定高；`msp_override_channels=7`（CLI dump 见 `new_mcu/drone/config/g473_msprc.txt`）。
+- 新主控 = **BetaFPV G473（STM32G474）**，与烧毁的同款**已重购**；**自研移植 INAV 10.0.0（STM32G4）当前能飞**；**本土化已落地**（上位机 MSP UART2@230400 链路已打通；CRSF/光流接口已配）。**2026-10-10 解决"离地即翻/自旋"**（根因＝**电机输出编号与物理接线错位**；修复：mixer 轮换版 + `motor_direction_inverted=OFF` + `align_board_roll=1800`）。工作区 `new_mcu/drone/`，详见 `new_mcu/README.md` 与 `new_mcu/AGENT_GUIDE.md`。**开关映射（2026-10-12 定稿）**：`ch5`=ARM；`ch6>1300 或 ch8>1300`=MSP RC OVERRIDE（OR）；`ch8>900`=ANGLE；`ch6`=范式(当前全 B)；`ch7[1300,1700)`=定点/`[1700,2100)`=定高；`msp_override_channels=7`（CLI dump 见 `new_mcu/drone/config/g473_msprc.txt`）。**2026-10-14：飞控改回正装 → 撤销倒装补偿**：`align_board_roll` 1802→**0**、mixer 恢复**标准 QuadX**（REAR_R/FRONT_R/REAR_L/FRONT_L），已 `save`；**电机转向用户另改（ESC/物理）**；**待 §5.5 拔桨复验三轴方向**（回退：align=1800 + 轮换版 mixer）。
 
 ## 6. 技术要点速查
 

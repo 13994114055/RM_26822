@@ -54,7 +54,7 @@
 4) 前向          CVI_NN_Forward
 5) 读输出(后处理) 解码 + NMS / argmax
 ```
-**底层 cviruntime**：pre/post 自己写；**高层 TDL**：框架自动做。
+**底层 cviruntime**：pre/post 自己写 . **高层 TDL**：框架自动做,包括pre/post。
 
 ---
 
