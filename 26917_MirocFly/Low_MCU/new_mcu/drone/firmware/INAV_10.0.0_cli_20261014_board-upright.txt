@@ -12,8 +12,9 @@ mmix 1  1.000 -1.000 -1.000  1.000    # FRONT_R
 mmix 2  1.000  1.000  1.000  1.000    # REAR_L
 mmix 3  1.000  1.000 -1.000 -1.000    # FRONT_L
 
-# --- 待定（未改）---
-# motor_direction_inverted = ON   （与"电机反装"的方向一起定；电机转向由用户在 ESC/物理 处理）
+# --- yaw 符号（电机反装 → 翻转 yaw 方向）---
+set motor_direction_inverted = OFF    # ON→OFF（原 ON：反装后自旋；改 OFF 修自旋）
+# 电机转向本体由用户在 ESC/物理处理（INAV 无 per-motor 方向接口）
 
 # ⚠️ 必须按 ../../AGENT_GUIDE.md §5.5 拔桨复验三轴方向后再飞（不可跳）
 # 回退到倒装方案： set align_board_roll = 1800  并恢复下方"180°轮换版" mixer：
