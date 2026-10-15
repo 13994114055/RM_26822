@@ -1,0 +1,196 @@
+# MirocFly G473 — 完整配置恢复文件（2026-10-15 从板上 diff all 实读）
+# 用法：CLI 里逐行粘贴（或以 batch 方式），末尾含 save。含 10-14 正装改动（mmix/align/motor_direction）。
+# 来源：直接 CLI diff all；与 config/g473_msprc.txt 的关系：此文件是“实机现况”的唯一权威快照。
+# ⚠️ 刷固件注意：刷 .bin 会清零配置区（0x08004000-0x08007FFF），刷 .hex 不会（hex 不含该区记录）。
+diff all
+
+# version
+# INAV/BETAFPVG473 10.0.0 Sep 26 2026 / 18:30:49 (3d2c8fdc) Dev
+# GCC-14.3.1 20250623
+
+# start the command batch
+batch start
+
+# reset configuration to default settings
+defaults noreboot
+
+# resources
+
+# Timer overrides
+timer_output_mode 4 LED
+
+# Outputs [servo]
+
+# safehome
+
+# Fixed Wing Approach
+
+# features
+feature PWM_OUTPUT_ENABLE
+
+# beeper
+
+# blackbox
+blackbox NAV_ACC
+blackbox NAV_POS
+blackbox NAV_PID
+blackbox MAG
+blackbox ACC
+blackbox ATTI
+blackbox RC_DATA
+blackbox RC_COMMAND
+blackbox MOTORS
+blackbox GYRO_RAW
+blackbox PEAKS_R
+blackbox PEAKS_P
+blackbox PEAKS_Y
+blackbox -SERVOS
+
+# Receiver: Channel map
+
+# Ports
+serial 0 0 115200 115200 0 115200
+serial 1 1 230400 2470000 0 2470000
+serial 3 1 115200 115200 0 115200
+
+# LEDs
+
+# LED color
+
+# LED mode_color
+
+# Modes [aux]
+aux 0 0 0 1775 2100
+aux 1 50 1 1300 2100
+aux 2 50 3 1300 2100
+aux 3 1 3 900 2100
+
+# Adjustments [adjrange]
+
+# Receiver rxrange
+
+# temp_sensor
+
+# Mission Control Waypoints [wp]
+#wp 0 invalid
+
+# OSD [osd_layout]
+
+# Programming: logic
+
+# Programming: global variables
+
+# Programming: PID controllers
+
+# OSD: custom elements
+
+# master
+set gyro_dyn_lpf_min_hz = 85
+set gyro_dyn_lpf_max_hz = 300
+set gyro_dyn_lpf_curve_expo = 3
+set gyro_zero_x = 2
+set gyro_zero_y = -3
+set gyro_zero_z = -1
+set ins_gravity_cmss =  982.564
+set acc_hardware = BMI270
+set acczero_x = -12
+set acczero_y = -20
+set acczero_z = -40
+set accgain_x = 4077
+set accgain_y = 4079
+set accgain_z = 4057
+set rangefinder_hardware = MSP
+set opflow_hardware = MSP
+set opflow_scale =  1.133
+set align_mag = CW270FLIP
+set mag_hardware = NONE
+set baro_hardware = NONE
+set msp_override_channels = 7
+set blackbox_rate_denom = 2
+set motor_pwm_protocol = DSHOT300
+set vbat_scale = 1100
+set applied_defaults = 2
+set airmode_type = THROTTLE_THRESHOLD
+
+# control_profile
+control_profile 1
+
+set mc_cd_pitch = 88
+set mc_cd_roll = 80
+set mc_cd_yaw = 90
+set d_boost_min =  1.000
+set d_boost_max =  1.000
+set antigravity_gain =  2.000
+set antigravity_accelerator =  5.000
+set smith_predictor_delay =  1.447
+set tpa_breakpoint = 1200
+set rc_expo = 80
+set rc_yaw_expo = 80
+set roll_rate = 70
+set pitch_rate = 70
+set yaw_rate = 60
+set ez_response = 92
+set ez_damping = 108
+set ez_stability = 110
+set ez_aggressiveness = 80
+set ez_rate = 134
+set ez_expo = 118
+
+# control_profile
+control_profile 2
+
+set d_boost_min =  1.000
+set d_boost_max =  1.000
+set antigravity_gain =  2.000
+set antigravity_accelerator =  5.000
+set tpa_rate = 20
+set tpa_breakpoint = 1200
+
+# control_profile
+control_profile 3
+
+set d_boost_min =  1.000
+set d_boost_max =  1.000
+set antigravity_gain =  2.000
+set antigravity_accelerator =  5.000
+set tpa_rate = 20
+set tpa_breakpoint = 1200
+
+# mixer_profile
+mixer_profile 1
+
+set model_preview_type = 3
+set motorstop_on_low = OFF
+
+# Mixer: motor mixer
+
+mmix reset
+
+mmix 0  1.000 -1.000  1.000 -1.000
+mmix 1  1.000 -1.000 -1.000  1.000
+mmix 2  1.000  1.000  1.000  1.000
+mmix 3  1.000  1.000 -1.000 -1.000
+
+# Mixer: servo mixer
+
+# battery_profile
+battery_profile 1
+
+
+# battery_profile
+battery_profile 2
+
+
+# battery_profile
+battery_profile 3
+
+
+# restore original profile selection
+control_profile 1
+mixer_profile 1
+battery_profile 1
+
+# save configuration
+save
+
+# 

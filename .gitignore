@@ -36,3 +36,8 @@ env/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# ========== 大体积归档（本地保存，不入库） ==========
+sdcard_images/
+26917_MirocFly.tar
+DM_H7_lab-main/

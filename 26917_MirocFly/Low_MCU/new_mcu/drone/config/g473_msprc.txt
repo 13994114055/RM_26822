@@ -30,9 +30,15 @@ set msp_override_channels = 7            # 只接管 roll/pitch/yaw, 油门走�
 aux 0  0  0 1775 2100    # ch5 = ARM (仅解锁)
 aux 1 50  1 1300 2100    # ch6>1300 -> MSP RC OVERRIDE (上位机接管)
 aux 2 50  3 1300 2100    # ch8>1300 -> MSP RC OVERRIDE (与上条 OR)
-aux 3  1  3  800 2100    # ch8>800  -> ANGLE
+aux 3  1  3  900 2100    # ch8>900  -> ANGLE (注: 800 会被 INAV 下限钳到 900, 实测板上=900)
 # 上位机读值(不配 FC 模式): ch6 选范式B ; ch7 定点[1300,1700)/定高[1700,2100)
 # 删除旧: ch6 ANGLE[900,1300] / HORIZON[1300,1700] / ch8 override[1700,2100]
+#
+# ⚠️ 计划变更 (2026-10-14/15, 见 ../../AGENT_GUIDE.md §5.6) — 尚未写入 FC:
+#   * 发射器只留 ch5(锁桨)+ch8(接管); ch6/ch7 选择作废
+#   * ch8 高区间启用 OVERRIDE + ANGLE + ALTHOLD (POSHOLD 视光流结论再定)
+#   * 定高需 mask=15 (接管油门, 上位机发中性 1500; 解锁/上锁仍发低位)
+#   * 定高优先, 定点条件重开
 
 # --- 光流 + 测距 (MTF-02P 走 MSP) ---
 set opflow_hardware = MSP
@@ -41,6 +47,6 @@ set rangefinder_hardware = MSP
 # set align_opflow  = <按安装朝向, 默认 CW0_DEG_FLIP>
 
 # --- 安全 ---
-set failsafe_procedure = DROP
+set failsafe_procedure = LAND       # 2026-10-15 定稿: 慢降(不返航); 板上实测亦为 LAND(此前稿为 DROP, 已统一)
 
 save
