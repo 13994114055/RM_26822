@@ -1,3 +1,6 @@
+> ⭐ **【第一要务 · 教学优先】** 所有的开发都是以学习为目的，让我学会东西为前提，而并非把目标完成放在第一位，我要穷究原理，哪怕工期可能延误，我会多抽出其他时间，所以你要以教学和传授方法知识为第一要务。
+> 📖 **开工前必读**：`../../../agent问答示例.md` —— 先学习其中的逻辑与思路（要做什么 → 为什么 → 由谁做基础），并作为**贯穿始终的回答方式**。
+
 # 下位机（飞控）开发指导 + 交接 — BetaFPV G473 / INAV 10.0.0(G4)
 
 > 本文件是 **MirocFly 下位机（飞行控制器）** 的**权威开发指导 + 交接文档**。
@@ -87,6 +90,11 @@ docker run --rm --privileged -v /dev/bus/usb:/dev/bus/usb --network host tpuc_ml
    dfu-util -d 0483:df11 -a 0 -s 0x08000000:leave -D /fw/BETAFPVG473-...bin'
 ```
 - 可烧写文件：`drone/firmware/BETAFPVG473-motor-af-i2c-fix/`（hex/bin/elf，地址 `0x08000000`）。
+- ⚠️ **刷机与配置区（2026-10-15 实测核实）**：FLASH 布局 = `0x08000000` 16K(code) + **`0x08004000` 16K(配置区)** + `0x08008000` 480K(code)。**`.bin` 覆盖配置区且该区为零填充 → 刷 bin 会清零配置**；**`.hex` 不含配置区记录 → 刷 hex 保留配置**。→ **优先刷 `.hex`**（`dfu-util ... -D xxx.hex`）。
+- **刷前必做**：把板上配置实读存档（CLI `diff all`）——权威恢复文件：`drone/firmware/INAV_10.0.0_cli_20261015_full-diffall.txt`（含 10-14 正装改动，可整段回粘 + `save`）。
+- **当前固件备份状态**：`firmware/BETAFPVG473-motor-af-i2c-fix/`（sha256 见其 README）与 `inav/build-g4-final/`（`bin/` + `inav_10.0.0_*.bin/hex`）**各一份、md5 完全一致**，且与板上在跑版本一致（版本串构建时间 `Sep 26 2026 / 18:30:49`）。
+- **🔙 回退（rollback，2026-10-15 定）**：若新固件不可用 → **刷回当前在飞版**：
+  `firmware/BETAFPVG473-motor-af-i2c-fix/BETAFPVG473-inav-10.0.0-motor-af-i2c-fix.hex`（同一 `dfu-util` 命令，只换文件名；**`.hex` 保留配置**）。验证：刷后 `fccli.py --cmd version` 应显示 `Sep 26 2026 / 18:30:49`、`status` 中 `GYRO/ACC=BMI270 OK`。配置若丢 → 回粘 `firmware/INAV_10.0.0_cli_20261015_full-diffall.txt` + `save`。
 
 ### 3.3 配置 / 调试 FC（USB VCP）
 - 脚本：`connection/fccli.py`（纯 stdlib，通过 USB VCP 与 FC CLI 交互）。
@@ -121,7 +129,7 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
 - 要点：**UART1(ttyS1) 与板载 Wi-Fi/BT(AIC8800) 共用引脚，不可用**；**UART0 需先释放 console getty**（板内 `/etc/inittab` 注释相应行）。
 - ⚠️ **必须 `serial 0 0 ...` 清空 UART1**：INAV 限 **最多 3 个 MSP 端口**（`MAX_MSP_PORT_COUNT=3`）；默认 VCP+UART1 已占 2，再加 UART2+UART4 会超限 → 启动时 serial 配置被**整体重置**（表现为"存不住"）。
 - MTF-02P 走 **MSP**：`opflow_hardware=MSP` + `rangefinder_hardware=MSP`（INAV 原生解析 `MSP2_SENSOR_OPTIC_FLOW`/`MSP2_SENSOR_RANGEFINDER`）。
-- 策略：保留物理 CRSF；上位机 `MSP RC Override`（永久 ID 50）。**2026-10-12（实验20）改 aux**：`ch5`=ARM(`aux 0 0 0 1775 2100`)；`ch6>1300`→override(`aux 1 50 1 1300 2100`)；`ch8>1300`→override(`aux 2 50 3 1300 2100`，与上条 **OR**)；`ch8>900`→ANGLE(`aux 3 1 3 900 2100`，注：800 被 INAV 下限钳到 900)；**删 HORIZON**。**`msp_override_channels=7`**（只接管 roll/pitch/yaw，油门留飞行员）。**⚠️ 掩码位序 = 内部通道号 AERT（`ROLL=0 PITCH=1 YAW=2 THROTTLE=3`），非负载 AETR；`11` 会误接管油门→切油**。`failsafe_procedure`：配置稿=DROP，**实测板载=LAND**（待统一）。配置见 `drone/config/g473_msprc.txt`。
+- 策略：保留物理 CRSF；上位机 `MSP RC Override`（永久 ID 50）。**2026-10-12（实验20）改 aux**：`ch5`=ARM(`aux 0 0 0 1775 2100`)；`ch6>1300`→override(`aux 1 50 1 1300 2100`)；`ch8>1300`→override(`aux 2 50 3 1300 2100`，与上条 **OR**)；`ch8>900`→ANGLE(`aux 3 1 3 900 2100`，注：800 被 INAV 下限钳到 900)；**删 HORIZON**。**`msp_override_channels=7`**（只接管 roll/pitch/yaw，油门留飞行员）。**⚠️ 掩码位序 = 内部通道号 AERT（`ROLL=0 PITCH=1 YAW=2 THROTTLE=3`），非负载 AETR；`11` 会误接管油门→切油**。`failsafe_procedure`：**2026-10-15 实读确认为 `LAND`**（慢降、不返航），配置稿已同步。配置见 `drone/config/g473_msprc.txt`。
 
 ---
 
@@ -181,6 +189,76 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
 
 **工具**：① 自写 INAV blackbox v2 解码器 `tools/blackbox_decode.py`（读 `~/Downloads/blackbox_log_*.TXT`，出姿态/舵面/电机 + 频谱）；② 台架实时读 `tools/msp_live.py`（i5，读 `ATTITUDE/RAW_IMU/MOTOR`）/ `tools/telem_mon.c`（板上只读遥测）。详见 `../../tools/README.md`。
 
+### 5.6 定高/定点（固件 Z 分支）计划 — 2026-10-14 定稿 / 2026-10-15 修订
+
+**目标**：无气压计/无 GPS 时，用 MTF-02P **测距**提供高度参考，使 INAV 的 `ALTHOLD` 可用；**定高优先，定点（POSHOLD）条件重开**。定高定点全部在固件完成，上位机定高冻结（详见根 `../../agent.md` §3.5）。
+
+**为什么先只做定高**：
+- **ALTHOLD 不在 `isUsingNAVModes` 列表**（`fc/rc_modes.c:305`），**不触发 GPS-home 解锁拦截**。
+- POSHOLD/RTH/WP 等会触发：解锁要求 `navigationPositionEstimateIsHealthy()`（含 `STATE(GPS_FIX_HOME)`），无 GPS 时返回 `NAV_ARMING_BLOCKER_MISSING_GPS_FIX` **拒绝解锁**（`navigation/navigation.c:6376,6392`）。
+- POSHOLD 还要求 `estVelStatus == EST_TRUSTED`（即 `eph < inav_max_eph_epv`，默认 1000cm），而 `eph` 仅在 **XY 传感器（光流）更新超时**时按 100/s 增长（`navigation_pos_estimator.c:768`）→ **定点稳定性直接取决于光流健康**。
+
+**阶段 0：光流/地面测试 — ✅ 已完成（2026-10-15，只读 `paradigm mon`）**
+- **结论**：光照度不是主因，**表面纹理主导**。光滑地面 `q≈20–24`（38/50/70cm 均如此，**低于门限 35 → 光流永不启用**）；有纹理面（鼠标垫/纹理垫）`q≈37–53`（29–61cm，**≥35 → 可启用**）。同架同静止只换面：21 → 39。
+- 强光直射反而更差（`q≈20`，疑高光过曝）；`q` 随运行时间缓慢上升（上电后稍等数秒更稳）。
+- 判定口径（源码）：`q` 为 0–100 标度；`sensors/opflow.c` `SQUAL_HIGH=35`（进入）/`SQUAL_LOW=10`（退出，滞回）。
+- 运动测试：手移主要由 **fY** 轴拾取（86→347），输出量化步进≈43，`opflow_scale` 未标定。
+- **操作性结论**：测试/飞行区铺**纹理地垫（鼠标垫即可）+ 高度 0.3–0.6m + 上电等数秒** → POSHOLD 的“光流健康”前提**可满足**（仍受无 GPS 解锁拦截限制）。
+- **门限判定**：✅ 达标 → **POSHOLD 可（在解决解锁拦截后）重开**。
+
+**接管与油门**
+- 一期：`mask=7`，飞行员扶油门中位试定高。
+- 二期：`mask=15`，上位机发中性 1500（**解锁/上锁时仍须发低位**，否则解锁条件不满足）。
+- `althold_throttle_type`：**先 `STICK`**（进入时油门值即“保持点”，对固定输入最可控）。
+
+**改动点（Z 分支）**
+- `navigation/navigation_pos_estimator.c` 的 `estimationCalculateCorrection_Z`：气压计与 GPS 均无效、测距有效时，用 `surface.alt` 修正 `est.pos.z`，权重复用 `w_z_surface_p/v`；同步更新 epv，使 `EST_Z_VALID` 可收敛/失效。
+- 解锁时记录地面零点；测距超时/可靠度低/超 `max_surface_altitude` 时 Z 失效并回落；不动气压计/GPS 分支。
+- **先验符号/坐标系**（`DEBUG_ALTITUDE`）——WP1 第一件事。
+
+**失效与安全**
+- `failsafe_procedure = LAND`（慢降），**不返航**；**“失联悬停”不采用**。
+- `ch5`=锁桨（唯一人工急停）；`ch8`=接管（高区间启用 `OVERRIDE+ANGLE+ALTHOLD`；POSHOLD 视阶段 0 结论）。
+- **看门狗（无人飞行前必做）**：上位机“控制循环心跳+监督线程”，超时 → 停发 RC（借 FC failsafe 落地）。
+
+**剩余只读核实**：紧急降落是否依赖高度估计。
+
+**✅ 实机只读核实（2026-10-15，FC 经 USB VCP，未改任何配置）**：
+- `failsafe_procedure = LAND`（确认；配置稿已同步）
+- `msp_override_channels = 7`；`nav_extra_arming_safety = ALLOW_BYPASS`；`nav_mc_althold_throttle = STICK`
+- `inav_max_eph_epv = 1000cm`；`inav_max_surface_altitude = 200cm`（**限制测距 Z 分支可用高度 0–2m，必要时上调，上限 1000**）
+- `inav_w_z_surface_p/v = 3.5 / 6.1`；`inav_w_xy_flow_v = 2.0`；`nav_mc_hover_thr = 1300`
+- ⚠️ **`inav_reset_altitude = FIRST_ARM` 不会直接清零 `est.pos.z`**（它只重置气压计/GPS 参考）。地面零点在**Z 分支内实现**（offset 解锁前跟随、解锁后冻结），其**时机**由该设置决定（需要每次解锁重置则改 `EACH_ARM`）。
+- **`inav_allow_dead_reckoning = OFF`** → **POSHOLD 的光流 XY 位置修正需要它 = ON**（`navigation_pos_estimator_flow.c` 仅 GPS 或 dead-reckoning 才做位置修正）
+- 传感器：`RANGEFINDER=OK, OPFLOW=OK`；`BARO/GPS/MAG=NONE`
+- 其他：PID 环 ~1988Hz（cycle 503us）、System load 14、Heap 余量 1668B、Stack 顶 0x10008000（= CCM 实际到 32K 的旁证）、配置占用 10486/16384
+
+**里程碑**：M1 拔桨比对 `est.pos.z`（0.2/0.5/1.0m）→ M2 绑绳 ALTHOLD 悬停 → M3 遮挡验失效 → M4 拔串口验 LAND → M5 短飞；定点 M6 视阶段 0 结论。
+
+### 5.7 Z 分支实现状态 — 2026-10-15（已编译，**未刷写**）
+
+**工作树**：新建 **`drone/inav-g4alt/`**（从 `inav-g4dbg/` 复制、去除 build；**原 `inav/`、`inav-g4dbg/` 保持未改动**，可随时回退）。注意：rsync 排除 `build` 时须用锚定 `/build`，否则会误删 `src/main/build/`（踩过）。
+
+**改动（3 文件）**
+- `navigation_pos_estimator_private.h`：`navPositionEstimatorSURFACE_t` 加 `updateDt`；新增 `INAV_SURFACE_DEFAULT_EPV 50.0f`。
+- `navigation_pos_estimator_agl.c`：`updatePositionEstimator_SurfaceTopic` 记录 `surface.updateDt`。
+- `navigation_pos_estimator.c`：`estimationCalculateCorrection_Z` 新增“测距 Z 分支”（条件：气压计与 GPS-Z 均无效 + `EST_SURFACE_VALID` + reliability≥0.33）；`maxUpdateDt`/清零纳入 `surface.updateDt`。
+  - 零点：`shouldResetReferenceAltitude()` 为真时用**滤波均值**更新 offset，解锁后冻结；Z 无效时直接吸附初始化（`pos.z = 测距-offset`、`vel.z=0`、`epv=INAV_SURFACE_DEFAULT_EPV`）。
+  - 修正：P/V 复用 `w_z_surface_p/v`，按 `bellCurve`（50cm 窗）+ reliability 加权；`epv` 用测距残差更新。增益结构与 INAV 自带 AGL 估计同构（每秒等效增益一致）。
+  - 未动气压计/GPS 分支；无气压计时该分支成为唯一 Z 源。
+
+**构建**（i5，arm-none-eabi-gcc 16.2.0）：`cmake -B build -G Ninja -DCOMPILER_VERSION_CHECK=OFF` + `ninja -C build BETAFPVG473`
+- 产物：`inav-g4alt/build/bin/BETAFPVG473.elf`、`inav-g4alt/build/inav_10.0.0_BETAFPVG473.hex`（刷写地址 `0x08000000`）
+- 体积：`FLASH1 458410B/480KiB = 93.26%`（+296B）、`RAM 88756B`（+12B）、`CCM 11872B`
+
+**⚠️ 行为变化（回归排查结论）**
+- `estAglStatus`: `EST_NONE`→`EST_USABLE`（Z 由无效变有效所致）。消费者多在 `== EST_TRUSTED` 门控 → 本机不触发；`getLandAltitude()` 仅固定翼使用 → 无影响。
+- 多旋翼降落检测：`safetyTime` 5000→1000ms（因 Z 有效）、`verticalSpeedSettled` 改用真实垂速 → **台架重点观察**（涉及 LAND 失效与自动上锁）。
+- `MSP_SONAR_ALTITUDE` 返回**测距原始值**（非 `agl.pos.z`）→ **上位机 `alt=` 不受影响**（已核实）。
+- 待改进（P2，落地阶段再议）：`aglQual` 保持 LOW → 触地检测少一层“距地 <5cm”确认。
+
+**未做**：刷写；FC 配置改动（`inav_allow_dead_reckoning`、`inav_reset_altitude`、aux 等）。
+
 ---
 
 ## 6. 关键坑与教训（血泪清单）
@@ -200,9 +278,10 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
 13. **INAV 电机编号 ≠ 物理编号**是高频坑：`mmix` 的行号 = **输出通道**，务必与真实电机一一对齐（本次主因）。
 14. **FC 在 CLI 模式时，UART2 的 MSP 不响应**：用 USB 进 CLI 读/改配置后，链路会短暂 `NO RESPONSE` → `save`（重启）或 `exit` 回正常模式，并**等 ~15–20s** 再测（重启后 UART2 MSP 就绪有延迟）。别误判成"接错线"。
 15. **电压采样（自制 target）**：`target.h` 的 `VBAT_SCALE_DEFAULT` 曾误设 **110**（=1.1:1），本板实际分压为 **11:1** → 电压只显示 ~0.4V（1S 电池）。正确值 **1100**（2026-10-10 修正源码 + 板上 `set vbat_scale = 1100` 已 `save` 持久化，重启后 `status` 显示 ~4V）。**自制 target 首次上电务必核对 `vbat_scale`/`current_meter_scale`。**
-16. **板载无气压计 → `ALTHOLD`/`POSHOLD` 不可用**：INAV 的高度控制前提 `navReadyAltControl` **只认气压计或 GPS**（`fc_msp_box.c:232`），**光流/激光测距都不算**（测距只在"已有 baro"后用于表面跟随/加权）。`baro_hardware=AUTO` 若开机没检测到，会被自动写回 `NONE`（`sensors/initialisation.c:87`）。本板（BetaFPV Air G4/G473）官方页标注 `Baro: —`。**想无 GPS 用光流定点 → 需外接气压计（BMP280/DPS310 到 I2C1：PA15=SCL/PB7=SDA）**；否则跳过。
+16. **板载无气压计 → `ALTHOLD`/`POSHOLD` 当前不可用；已决定改固件加“测距 Z 分支”解锁（2026-10-14）**：INAV 模式准入看**估计器状态**——`canActivateAltHoldMode()` 要求 `estAltStatus >= EST_USABLE`，`canActivatePosHoldMode()` 还要求 `estVelStatus == EST_TRUSTED`（`navigation/navigation.c:6020-6028`）。而 `est.pos.z` 的修正只在**气压计/GPS** 分支（`navigation_pos_estimator.c` `estimationCalculateCorrection_Z`）；测距只进 AGL 估计，且 AGL 还要求 `EST_BARO_VALID`（`navigation_pos_estimator_agl.c:83`）。故无气压计/GPS 时 Z 无法收敛、模式进不去。`baro_hardware=AUTO` 开机检测不到会被写回 `NONE`（`sensors/initialisation.c:87`）。**⚠️ 更正**：旧文引用的 `navReadyAltControl`（`fc_msp_box.c:232`）在 INAV 10 源码中**不存在**，以上述估计器准入为准。计划见 §5.6。
 17. **串口设 GPS 但无 GPS 模块 → 无效**；且**别动 UART2=上位机 MSP**（会破坏链路）。本板 UART 已排满（UART1 仅RX / UART2 上位机MSP / UART3 CRSF / UART4 光流MSP）。
 18. **`msp_override_channels` 位序 = AERT（内部通道号），不是 AETR**：INAV 内部 `ROLL=0 PITCH=1 YAW=2 THROTTLE=3`（`fc/rc_controls.h`），掩码 `1<<channel`（`rx/msp_override.c:269`）；而 `SET_RAW_RC` 的**负载**顺序才是 AETR（`rcmap={0,1,3,2}`）。故"只接管三轴、油门留飞行员"= **`7`(0111)**；**`11`(1011) 会接管 roll/pitch/throttle 而放开 yaw → payload 油门(1000) 覆盖物理油门 → 空中切油**。Betaflight 掩码则是 AETR（bit2=throttle），**两家不一致，别照搬**。可用上位机实验18/20 `probe`/`MSP_RC`(105, 回读 override **之后**的通道) 确认是否真接管（**别用 `MSP_ACTIVEBOXES` 位掩码**：INAV 按"下发顺序"打包，非 box 枚举号）。
+19. **无 GPS 时配置 POSHOLD/RTH/WP 会拦截解锁（2026-10-15 核实）**：`isUsingNAVModes` 只要配置了 **POSHOLD/RTH/COURSEHOLD/CRUISE/WP** 任一开关即为真（`fc/rc_modes.c:305`）；解锁要求 `navigationPositionEstimateIsHealthy()`＝`estPosStatus>=EST_USABLE && estAltStatus>=EST_USABLE && STATE(GPS_FIX_HOME)`（`navigation/navigation.c:6376`），否则返回 `NAV_ARMING_BLOCKER_MISSING_GPS_FIX`（`:6392`）。无 GPS 时 `GPS_FIX_HOME` 依赖“解锁前由光流等建立 home”（要求 `estPosStatus>=EST_USABLE`）。**⚠️ ALTHOLD 不在该列表 → 定高不受影响**——这正是“先定高、定点后置”的原因。另：`eph` 仅在 XY 传感器更新超时时按 100/s 增长（上限 `inav_max_eph_epv`＝1000cm），**光流健康是定点稳定的前提**。`nav_extra_arming_safety=ALLOW_BYPASS`（默认）可用 YAW_HI 杆位临时绕过（无飞手时不可用）。
 
 ---
 

@@ -12,3 +12,7 @@ Release/
 
 # ---- IDE ----
 .idea/
+
+# ---- 例外：固件归档目录（成品固件/配置快照）要入库 ----
+!new_mcu/drone/firmware/
+!new_mcu/drone/firmware/**

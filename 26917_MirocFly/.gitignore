@@ -17,6 +17,7 @@ Host_Lichee_RV_Nano/CVI_HW_OpenCV/
 Low_MCU/new_mcu/drone.zip
 Low_MCU/new_mcu/drone/inav/
 Low_MCU/new_mcu/drone/inav-g4dbg/
+Low_MCU/new_mcu/drone/inav-g4alt/
 Low_MCU/new_mcu/drone/betafpvg47/bf-source-4.5.1/
 Low_MCU/new_mcu/drone/tools/esc-configurator-src/
 Low_MCU/new_mcu/drone/.tools/Ruby40/
