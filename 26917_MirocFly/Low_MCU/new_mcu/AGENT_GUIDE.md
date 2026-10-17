@@ -235,7 +235,7 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
 
 **里程碑**：M1 拔桨比对 `est.pos.z`（0.2/0.5/1.0m）→ M2 绑绳 ALTHOLD 悬停 → M3 遮挡验失效 → M4 拔串口验 LAND → M5 短飞；定点 M6 视阶段 0 结论。
 
-### 5.7 Z 分支实现状态 — 2026-10-15（已编译，**未刷写**）
+### 5.7 Z 分支实现状态 — 2026-10-15 实现 / 10-16 刷写 / 10-17 台架首验通过
 
 **工作树**：新建 **`drone/inav-g4alt/`**（从 `inav-g4dbg/` 复制、去除 build；**原 `inav/`、`inav-g4dbg/` 保持未改动**，可随时回退）。注意：rsync 排除 `build` 时须用锚定 `/build`，否则会误删 `src/main/build/`（踩过）。
 
@@ -257,7 +257,23 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
 - `MSP_SONAR_ALTITUDE` 返回**测距原始值**（非 `agl.pos.z`）→ **上位机 `alt=` 不受影响**（已核实）。
 - 待改进（P2，落地阶段再议）：`aglQual` 保持 LOW → 触地检测少一层“距地 <5cm”确认。
 
-**未做**：刷写；FC 配置改动（`inav_allow_dead_reckoning`、`inav_reset_altitude`、aux 等）。
+**✅ M1 台架首验通过（2026-10-17，拔桨解锁状态）**
+- 条件：ch5=2000 解锁（`T≈1006~1017` = 油门到底）、ch8=1000、ch7=1000；上位机 `paradigm mon`（已加 `MSP_ALTITUDE(109)` 显示 `z/vz`）。
+- 结果：**z 全程跟随 alt（误差 0~3cm），3~83cm 均成立；静止时 `vz` 收敛到 0**。
+- 机制验证：**未解锁前 z 被钉在 0**（零点持续跟随，`shouldResetReferenceAltitude()`）；**解锁瞬间零点冻结后 z 正常跟踪** —— 与实现预期完全一致（这也是"必须先解锁才能测 z"的原因）。
+- 已知动态特性：快速手动升降时 z 滞后/微超调（1–2s 收敛、不发散）——有限权重修正的正常二阶响应。
+- 已知盲区：**在平地外做水平平移**（如从桌边平移到地面）测距会阶跃 → z 出现"假高度"（`bellCurve` 50cm 窗降权 0.1× 减慢收敛、不能消除）；平地飞行无影响。
+- 待做：**M3 遮挡验失效**（`EST_SURFACE_VALID` 掉后 z 漂移行为）；M2 绑绳/飞行验证。
+
+**FC 配置（方案 A，2026-10-16 写入并 save）**：`aux 4 3 2 1300 2100`（ch7≥1300 → NAV ALTHOLD；现阶段"中位即定高"）；后续拆分为 `[1300,1700)`=定高 / `[1700,2100)`=定点（需先解 POSHOLD 三门）。
+
+**✅ 首次定高试飞（2026-10-17，黑匣子 `~/Downloads/第一次定高.TXT`，5 段）**
+- **段1（12.5s，纯 ANGLE）**：起飞→悬停≈12s，姿态 ±2°、电机 ~1600，正常收尾；**电机长期不对称**（m0 恒低 ~50，疑 CoG/校准）→ 与"水平漂"相关。
+- **段4（15.5s，ANGLE+NAV_ALTHOLD）**：`flightModeFlags=10`（bit1=ANGLE｜bit3=NAV_ALTHOLD）→ **定高真实挂上并飞行**；`navFlags=1`（bit0=`estAltStatus==EST_TRUSTED`）→ **Z 分支在飞行中给出可信高度**；测距爬到 ~1.66m；**结尾 ~14.4s 翻滚坠机**（roll→70°、m1 饱和 2000、油门命令顶满但高度反降 → 疑撞击/失控，待归因）。
+- **黑匣子字段口径（踩坑记录）**：`mspOverrideFlags` bit0 = **MSP 接管数据流的 failsafe**（`rx/msp_override.c` 本地静态，**不是物理 RX 失控**！）bit1=接管激活；`navState`：1=`NAV_CTL_ALT`、3=`ALT|POS`；`navFlags`：bit0=alt TRUSTED / bit1=AGL / bit2=pos / bit3=terrain-follow / bit5=heading；`flightModeFlags`：bit1=ANGLE、bit3=NAV_ALTHOLD。
+- **待办**：坠机归因；"灵敏度高（轻打杆大幅动作，用户 1a）+ 水平漂（2）"→ 取干净悬停段黑匣子分析 (gyro/PID/rates) + CoG 配平。
+
+**未做**：方案 B（给 `navReadyAltControl` 补测距分支，让 ALTHOLD 进 Configurator 列表）；`inav_reset_altitude` 改 `EACH_ARM`（可选）。
 
 ---
 
@@ -282,6 +298,8 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
 17. **串口设 GPS 但无 GPS 模块 → 无效**；且**别动 UART2=上位机 MSP**（会破坏链路）。本板 UART 已排满（UART1 仅RX / UART2 上位机MSP / UART3 CRSF / UART4 光流MSP）。
 18. **`msp_override_channels` 位序 = AERT（内部通道号），不是 AETR**：INAV 内部 `ROLL=0 PITCH=1 YAW=2 THROTTLE=3`（`fc/rc_controls.h`），掩码 `1<<channel`（`rx/msp_override.c:269`）；而 `SET_RAW_RC` 的**负载**顺序才是 AETR（`rcmap={0,1,3,2}`）。故"只接管三轴、油门留飞行员"= **`7`(0111)**；**`11`(1011) 会接管 roll/pitch/throttle 而放开 yaw → payload 油门(1000) 覆盖物理油门 → 空中切油**。Betaflight 掩码则是 AETR（bit2=throttle），**两家不一致，别照搬**。可用上位机实验18/20 `probe`/`MSP_RC`(105, 回读 override **之后**的通道) 确认是否真接管（**别用 `MSP_ACTIVEBOXES` 位掩码**：INAV 按"下发顺序"打包，非 box 枚举号）。
 19. **无 GPS 时配置 POSHOLD/RTH/WP 会拦截解锁（2026-10-15 核实）**：`isUsingNAVModes` 只要配置了 **POSHOLD/RTH/COURSEHOLD/CRUISE/WP** 任一开关即为真（`fc/rc_modes.c:305`）；解锁要求 `navigationPositionEstimateIsHealthy()`＝`estPosStatus>=EST_USABLE && estAltStatus>=EST_USABLE && STATE(GPS_FIX_HOME)`（`navigation/navigation.c:6376`），否则返回 `NAV_ARMING_BLOCKER_MISSING_GPS_FIX`（`:6392`）。无 GPS 时 `GPS_FIX_HOME` 依赖“解锁前由光流等建立 home”（要求 `estPosStatus>=EST_USABLE`）。**⚠️ ALTHOLD 不在该列表 → 定高不受影响**——这正是“先定高、定点后置”的原因。另：`eph` 仅在 XY 传感器更新超时时按 100/s 增长（上限 `inav_max_eph_epv`＝1000cm），**光流健康是定点稳定的前提**。`nav_extra_arming_safety=ALLOW_BYPASS`（默认）可用 YAW_HI 杆位临时绕过（无飞手时不可用）。
+20. **SURFACE（地表跟随）本板不可用——两处硬依赖气压计（2026-10-17 核实）**：① 模式盒广告条件 `sensors(SENSOR_BARO) && sensors(SENSOR_RANGEFINDER)`（`fc/fc_msp_box.c:226`）；② 地形跟随时高度控制器改读 `posControl.actualState.agl`（`navigation/navigation.c`：`terrainFollow ? agl : abs`），而 AGL 估计要求 `EST_BARO_VALID`（`navigation_pos_estimator_agl.c:83`）→ 无 baro 时 `aglAlt` 恒 0。**定高结论：用 ALTHOLD（Z 分支），平地场景与 SURFACE 等价**。
+21. **解锁排查速查（2026-10-16 实测踩坑）**：`status` 的 `Arming disabled flags` 是权威判据——`ARMSW`=ch5 不在解锁位（需 ≥1775，实测开关高档=2000）；**`THR`=油门杆必须收到最低（≈1000，非中位）**；`DSHOTBEEPER`=上电初期蜂鸣器瞬态（几秒自消）；`CLI`=USB CLI 会话中禁解锁。另：**未解锁时零点持续跟随测距 → `MSP_ALTITUDE` 的 `z` 恒≈0**（`WAS_EVER_ARMED` 前速度不积分 + 零点跟随，见 §5.7）→ **验证 z 必须"先解锁"**。TX 未开机时通道读数为失控保护值（ch5 曾见 1750，勿据此调区间）。
 
 ---
 

@@ -18,6 +18,8 @@
  *
  * 用法: ./paradigm [mode=run|dry|mon] [w] [h] [frames] [serial_dev] [baud=230400]
  *   dry = 只算不发 RC(静态验证); mon = 只读光流/RC(无相机); 省略 serial_dev -> PTY
+ *   mon 输出: q(光流质量) fX/fY(原始流) | alt(测距原始[cm]) z(估计器高度[cm]) vz(垂速[cm/s])
+ *            | R/P/Y/T(摇杆: roll/pitch/yaw/油门, 内部序) | ch5-8 | ovr
  * env: MIROCFLY_KD(速度增益) KPP(位置增益) POSLEAK MAXDELTA ALPHA ALT_M SX SY SECS
  */
 #define _GNU_SOURCE
@@ -58,9 +60,11 @@ static int clampi(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v
 struct tele {
 	int att_r, att_p, att_y;
 	int quality, flow_x, flow_y, body_x, body_y;
-	long alt_cm;
+	long alt_cm;        /* 测距原始值 (MSP_SONAR_ALTITUDE) */
+	long est_z_cm;      /* 估计器高度 z (MSP_ALTITUDE, 定高/Z分支验证用) */
+	int  est_vz;        /* 估计器垂速 cm/s */
 	uint16_t rc[16]; int nrc;
-	int got_att, got_flow, got_alt, got_rc;
+	int got_att, got_flow, got_alt, got_alt_est, got_rc;
 };
 static msp_parser2_t g_rx;
 
@@ -70,6 +74,7 @@ static void send_reqs(int fd)
 	msp_send_request(fd, MSP_RC);
 	msp2_send_request(fd, MSP2_INAV_OPTICAL_FLOW);
 	msp_send_request(fd, MSP_SONAR_ALTITUDE);
+	msp_send_request(fd, MSP_ALTITUDE);
 }
 
 static int poll_tele(int fd, tele *t, int timeout_ms)
@@ -98,6 +103,12 @@ static int poll_tele(int fd, tele *t, int timeout_ms)
 			t->alt_cm = (long)a;
 			t->got_alt = (a >= 5 && a <= 800) ? 1 : 0;   /* 仅 [5,800]cm 视为有效 */
 		
+		} else if (cmd == MSP_ALTITUDE && len >= 6) {
+			/* u32 估计高度 z[cm] + u16 垂速[cm/s] (+ u32 baro, 无 baro 时为 0) */
+			int32_t z = (int32_t)(pl[0] | (pl[1] << 8) | (pl[2] << 16) | ((uint32_t)pl[3] << 24));
+			t->est_z_cm = (long)z;
+			t->est_vz = (int16_t)(pl[4] | (pl[5] << 8));
+			t->got_alt_est = 1;
 		} else if (cmd == MSP2_INAV_OPTICAL_FLOW && len >= 9) {
 			t->quality = pl[0];
 			t->flow_x = (int16_t)(pl[1] | (pl[2] << 8));
@@ -132,8 +143,9 @@ static int run_mon(int fd)
 		double now = now_s();
 		if (now - tlog >= 0.15) {
 			tlog = now;
-			printf("[%6.1fs] q=%3d fX=%6d fY=%6d | alt=%ldcm | ch5=%4u ch6=%4u ch7=%4u ch8=%4u | ovr=%d\n",
-			       now - t0, t.quality, t.flow_x, t.flow_y, t.alt_cm,
+			printf("[%6.1fs] q=%3d fX=%6d fY=%6d | alt=%ldcm z=%ldcm vz=%+d | R=%4u P=%4u Y=%4u T=%4u | ch5=%4u ch6=%4u ch7=%4u ch8=%4u | ovr=%d\n",
+			       now - t0, t.quality, t.flow_x, t.flow_y, t.alt_cm, t.est_z_cm, t.est_vz,
+			       ch_get(&t,0), ch_get(&t,1), ch_get(&t,2), ch_get(&t,3),
 			       ch_get(&t,4), ch_get(&t,5), ch_get(&t,6), ch_get(&t,7),
 			       ((ch_get(&t,5)>1300) || (ch_get(&t,7)>1300)) ? 1 : 0);
 		}
@@ -262,8 +274,8 @@ static int run_track(int fd, int req_w, int req_h, int frames)
 
 		if (now - tlog >= 0.15) {
 			tlog = now;
-			printf("[%6.1fs] %-14s ch6=%4d ch7=%4d | q=%3d tX=%6d tY=%6d alt=%ld | vR=%+.2f vF=%+.2f | %s roll=%4d pitch=%4d\n",
-			       now - t0, mode, ch6, ch7, t.quality, transX, transY, t.alt_cm, vr, vf,
+			printf("[%6.1fs] %-14s ch6=%4d ch7=%4d | q=%3d tX=%6d tY=%6d alt=%ld z=%ld | vR=%+.2f vF=%+.2f | %s roll=%4d pitch=%4d\n",
+			       now - t0, mode, ch6, ch7, t.quality, transX, transY, t.alt_cm, t.est_z_cm, vr, vf,
 			       g_dry ? "[dry]" : "", roll, pitch);
 		}
 		seq++;

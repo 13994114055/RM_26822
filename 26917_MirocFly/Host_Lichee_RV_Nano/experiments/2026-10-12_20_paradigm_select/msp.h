@@ -15,6 +15,7 @@ extern "C" {
 #define MSP_MOTOR           104   /* out: 8x u16 电机输出(1000-2000) */
 #define MSP_RC              105   /* out: FC 实际在用通道(override 之后), 内部序 [roll pitch yaw throttle ...] */
 #define MSP_ATTITUDE        108
+#define MSP_ALTITUDE        109   /* out: u32 估计高度[cm] + u16 垂速[cm/s] + u32 baro[cm] (估计器 Z, 非测距原始值) */
 #define MSP_ACTIVEBOXES     113   /* out: 全宽 box 位掩码(注意: 按"下发顺序索引"打包, 非 box 枚举号!) */
 #define MSP_BOXIDS          119   /* out: 各 box 的永久ID, 顺序 = MSP box 索引(可据此定位 OVERRIDE=50) */
 #define MSP_RX_MAP          64    /* out: 通道映射(注意旧 msp.h 误写成 105) */
