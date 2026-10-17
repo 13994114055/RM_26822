@@ -101,6 +101,7 @@ LicheeRV Nano (SG2002) 上位机 —— Linux视觉层: 采集→识别→目标
 |---|---|---|---|
 | 0 相机出帧 | 交叉编译 + CSI 抓帧 | 🟢 **`experiments/…/04_vision_module` Form A 出真图**；`05_rtsp_stream` RTSP 预览打通（B7/B9/B11 已解） | 阶段 1（HSV）或 MSP 链路 |
 | 1 绿色荧光 | HSV → 视觉→控制闭环（INAV） | 🟢 **台架/板端全通**：检测(06)+链路(07)+打磨(14 EMA/丢检滞回/FC遥测)+可视化(15 RTSP叠加)+撞击(16 IMU)+状态机干跑(17)+**操控下位机(18 MSP RC Override)**+**光流阻尼(19)**+**接管三轴/范式选择(20)** | 台架（压重物/绑绳）验 B追踪/定点/阻尼 → 真机短飞；光流质量一般待改善；定高(O3)需接管油门 |
+| **1.5 定高（固件 Z 分支）** | 测距→高度估计 → `NAV ALTHOLD`（ch7） | 🟢 **固件已刷 + 台架验证(z 跟踪±3cm) + 首次定高试飞**（黑匣子证实 ALTHOLD 真实生效、`navFlags bit0=1` 高度可信） | **坠机归因 + 手感调参（水平漂/灵敏度高）** → 定高稳定悬停 |
 | 2 不规则物体 | YOLOv8n NPU 部署 → 撞击 → 30s 返航 | 🟡 **部署(09/10)+量化(11)已通**；自训装甲模型待 4060 | 训练+导出 → 量化 → 部署 |
 | 3 自写固件 | 下位机自研飞控 | ⏳ 远期 | 新主控 G473 已重购、INAV G4 能飞；待上位机对接后推进 |
 
@@ -130,6 +131,7 @@ LicheeRV Nano (SG2002) 上位机 —— Linux视觉层: 采集→识别→目标
 **下位机** `Low_MCU/`
 - AT32 方案**已冻结**（`archive_at32/agent_at32.md`）。
 - 新主控 = **BetaFPV G473（STM32G474）**，与烧毁的同款**已重购**；**自研移植 INAV 10.0.0（STM32G4）当前能飞**；**本土化已落地**（上位机 MSP UART2@230400 链路已打通；CRSF/光流接口已配）。**2026-10-10 解决"离地即翻/自旋"**（根因＝**电机输出编号与物理接线错位**；修复：mixer 轮换版 + `motor_direction_inverted=OFF` + `align_board_roll=1800`）。工作区 `new_mcu/drone/`，详见 `new_mcu/README.md` 与 `new_mcu/AGENT_GUIDE.md`。**开关映射（2026-10-12 定稿）**：`ch5`=ARM；`ch6>1300 或 ch8>1300`=MSP RC OVERRIDE（OR）；`ch8>900`=ANGLE；`ch6`=范式(当前全 B)；`ch7[1300,1700)`=定点/`[1700,2100)`=定高；`msp_override_channels=7`（CLI dump 见 `new_mcu/drone/config/g473_msprc.txt`）。**2026-10-14：飞控改回正装 → 撤销倒装补偿**：`align_board_roll` 1802→**0**、mixer 恢复**标准 QuadX**（REAR_R/FRONT_R/REAR_L/FRONT_L），已 `save`；**电机转向用户另改（ESC/物理）**；**待 §5.5 拔桨复验三轴方向**（回退：align=1800 + 轮换版 mixer）。
+- **2026-10-16/17：定高（测距 Z 分支）落地并首飞**：Z 分支固件（`drone/inav-g4alt/`，Oct 15 构建）已刷；`aux 4 3 2 1300 2100`（`ch7≥1300`＝**NAV ALTHOLD**，现"中位即定高"）；**台架**：解锁后 z 跟踪测距（误差 0–3cm，3–83cm）；**首次定高试飞**（黑匣子 `~/Downloads/第一次定高.TXT`，5 段）：`flightModeFlags=10`（ANGLE｜NAV_ALTHOLD）→ **定高真实挂上**、`navFlags bit0=1`（高度估计 TRUSTED）、测距爬升 ~1.66m；**结尾 ~14.4s 翻滚坠机（待归因）**。用户手感反馈：**水平漂 + 灵敏度高（轻打杆大幅动作）** → 待黑匣子调参 + CoG/校准核对。**SURFACE 模式不可用**（模式盒与 AGL 估计两处硬依赖气压计）。详见 `Low_MCU/new_mcu/AGENT_GUIDE.md` §5.7 / §6-20 / §6-21。
 
 ## 6. 技术要点速查
 

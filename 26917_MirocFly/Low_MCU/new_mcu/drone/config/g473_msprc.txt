@@ -31,6 +31,11 @@ aux 0  0  0 1775 2100    # ch5 = ARM (仅解锁)
 aux 1 50  1 1300 2100    # ch6>1300 -> MSP RC OVERRIDE (上位机接管)
 aux 2 50  3 1300 2100    # ch8>1300 -> MSP RC OVERRIDE (与上条 OR)
 aux 3  1  3  900 2100    # ch8>900  -> ANGLE (注: 800 会被 INAV 下限钳到 900, 实测板上=900)
+aux 4  3  2 1300 2100    # ch7[1300,2100) -> NAV ALTHOLD(定高, 永久ID=3; 2026-10-16 写入并save)
+# ⚠️ 分期方案: 现阶段"中位(≈1503)即定高"; 等定高稳定后拆成:
+#     aux 4 3 2 1300 1700  (ch7 中位 = 定高)  +  另加定点槽 (ch7 高位 = POSHOLD, 需先解 POSHOLD 三道门)
+# 说明: ALTHOLD 不进 Configurator 的 Modes 列表(可用性过滤 navReadyAltControl=需气压计/GPS),
+#       但 CLI 配置有效(updateActivatedModes 只看 aux 区间); 功能前提=estAltStatus 有效(Z分支)
 # 上位机读值(不配 FC 模式): ch6 选范式B ; ch7 定点[1300,1700)/定高[1700,2100)
 # 删除旧: ch6 ANGLE[900,1300] / HORIZON[1300,1700] / ch8 override[1700,2100]
 #

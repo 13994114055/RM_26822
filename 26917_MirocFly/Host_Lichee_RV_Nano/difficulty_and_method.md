@@ -282,6 +282,39 @@ cd /root && /mnt/system/usr/bin/test_mmf 4 ; ls -la /root/*.jpg
 ### H4. 长期基座选择
 - **待定**：长期用 **scpcom 镜像**（相机已通），还是把 scpcom 的修复移植回官方镜像。
 
+### H5. 第一次定高试飞遗留问题（2026-10-17）
+- **坠机归因**：黑匣子段4 结尾 ~14.4s 翻滚（roll→70°、m1 饱和 2000、油门命令顶满但高度反降、`navState` 1→3）——待排查（撞击/失控？）。
+- **手感调参**：水平漂（ANGLE 固有 + 电机输出长期不对称 m0 恒低 ~50，疑 CoG/校准）+ 灵敏度高（轻打杆大幅动作；现 rc_expo=80、PID 默认）→ 待取干净悬停段黑匣子分析。
+- **POSHOLD（定点）后置**：广告门/解锁拦截/光流健康三处待解（见 `../Low_MCU/new_mcu/AGENT_GUIDE.md` §6-19/§5.6）。
+
+---
+
+## I. MSP 链路 / 定高（2026-10）
+### I1. MSP v2 与 v1 混帧流
+- **现象**：请求光流（`MSP2_INAV_OPTICAL_FLOW` 0x2001）等功能时需要 v2，但 FC 遥测流里 v1/v2 混发，只按 v1 解析会错帧。
+- **根因**：MSP v1 头 `$M`(0x24,0x4D)、v2 头 `$X`(0x24,0x58)；v2 带 2 字节 cmd、2 字节 size、`crc8_dvb_s2`。
+- **解决**：`msp_parser/send` 同时支持两种帧（`msp2_send_request`/`msp_parser2_feed`，吃 v1+v2），按首字节第二个字符分流。见 `experiments/2026-10-12_19_opflow_hold/`。
+
+### I2. 定高方案选型：SURFACE 不可用 → ALTHOLD
+- **现象**：想用"地表跟随（SURFACE）"做定高，配置后模式盒子不出现/行为无高度源。
+- **根因**：SURFACE 有两处**硬依赖气压计**——① 模式盒广告条件 `sensors(SENSOR_BARO)&&sensors(SENSOR_RANGEFINDER)`（`fc/fc_msp_box.c:226`）；② AGL 估计要求 `EST_BARO_VALID`（`navigation_pos_estimator_agl.c:83`）。本板无 baro。
+- **解决**：改用 **ALTHOLD**（其门是 `estAltStatus>=EST_USABLE`，可由测距 Z 分支满足）；平地场景两者等价。**已写入固件 Z 分支并在飞行中验证**。
+
+### I3. 谜题：`MSP_ALTITUDE` 的 z 在地面恒 0
+- **现象**：台架上测距明明在变，`mon` 里 z≈0；一度怀疑 Z 分支坏。
+- **根因**：**未解锁时**零点持续跟随测距（`shouldResetReferenceAltitude`），且 `WAS_EVER_ARMED` 前速度不积分（`navigation_pos_estimator.c`）→ z 恒 0 是**设计行为**。
+- **解决**：**先解锁再验证**；解锁瞬间零点被冻结，z 正常跟踪（台架 0–3cm 误差）。另：`sensors/opflow.c` 无关；详见 `../Low_MCU/new_mcu/AGENT_GUIDE.md` §5.7。
+
+### I4. 黑匣子字段误读坑（调试被带偏）
+- **现象**：日志里 `failsafe=1`，以为飞行中触发了失控保护；`flightModeFlags/navFlags/navState` 不知何义。
+- **根因**：`mspOverrideFlags` bit0 是 **MSP 接管数据流的 failsafe**（`rx/msp_override.c` 本地静态，与物理 RX 无关！）bit1=接管激活；`navState`=导航控制器位（1=`NAV_CTL_ALT`、3=`ALT|POS`）；`navFlags` bit0=`estAltStatus==TRUSTED`、bit1=AGL、bit2=pos、bit3=terrain；`flightModeFlags` bit1=ANGLE、bit3=`NAV_ALTHOLD`。
+- **解决**：读源码定语义（`blackbox.c:1545`、`runtime_config.h:94`、`navigation_private.h:349`）。**首次定高试飞据此证实 ALTHOLD 真实生效**（`flightModeFlags=10`）。
+
+### I5. 光流质量之谜 → 纹理主导（阶段 0 结论）
+- **现象**：光流 `q` 时好时坏（20–53），怀疑与高度/光照相关。
+- **根因**：实测（`paradigm mon`）**由表面纹理主导**——光滑地面 q≈20–24（低于 INAV 门限 35），有纹理地垫 37–53；强光直射反而过曝变差；与高度无关。
+- **解决**：飞行/测试区**铺有纹理不反光地垫**（鼠标垫即可），高度 0.3–0.6m，上电后等数秒。见 Host `AGENT_GUIDE.md` §11。
+
 ---
 
 ## 更新日志
@@ -302,3 +335,4 @@ cd /root && /mnt/system/usr/bin/test_mmf 4 ; ls -la /root/*.jpg
   - **2026-09-29（量化打通）**：新增实验 `experiments/2026-09-28_11_quantize/`——**TPU-MLIR 量化打通**：`resnet18.onnx` → `cv181x INT8 cvimodel`（11.87MB），板上 NPU 推理 43.9FPS。新增 **B15**（Docker 环境四坑：Hub 慢→算能 CDN 打包镜像；中断拉取污染内容存储；bridge 网络坏→`--network none`；镜像缺 tpu_mlir→容器内 pip+commit）。
   - **2026-09-26（晚）MSP 链路（阶段1 链路）**：新增实验 `experiments/2026-09-26_07_msp_link/`（纯 C，不依赖中间件）；实现 MSP v1 编解码/流式解析/串口/`offset→RC`。**无硬件自测法**：用 **PTY（`posix_openpt`）在同进程内模拟 FC** 做端到端收发（客户端↔模拟FC），验证 termios+分帧+校验，`selftest`+`pty` 均 OK。真串口 UART1@460800 待下位机。
   - **2026-09-29（传统CV装甲板 S0+S1）**：新增实验 `experiments/2026-09-29_12_armor_led/`——**传统 CV 检测红/蓝 LED 灯条**（不依赖训练）。S0 用纯 PIL + 自解单应生成**透视梯形**合成图 21 张（含真值）；S1 用 **cv2** 实现 通道差→形态学→minAreaRect→同色松弛配对→四点四边形中心，合成集 **召回/精确 100%、中心误差 0.34px**。新增 **B16**（灯条长轴取错对角线；中心受 boxPoints 内外边影响偏 ~10px）。PC 用独立 venv 装 `opencv-python 5.0.0`（与板端 opencv-mobile 5.0.0 对齐）。
+- **2026-10-17（定高首飞 + 文档同步）**：新增 **I1–I5**（MSP v1/v2 混帧解析、SURFACE 不可用→ALTHOLD、`z 恒 0` 谜题、黑匣子字段语义误读、光流质量=纹理主导）+ **H5**（首飞遗留：坠机归因 / 水平漂+灵敏度调参 / POSHOLD 后置）。首飞结论：黑匣子证实 `ANGLE｜NAV_ALTHOLD` 真实生效、高度估计 TRUSTED（Z 分支飞行中验证）、爬至 ~1.66m；**结尾 ~14.4s 翻滚坠机待归因**。同步更新 `agent.md` / 根 `README.md` / 两份 `AGENT_GUIDE.md` / `commands.md` / `exp20 README`。项目根 `交接说明_2026-10-17.md` 存有**交接话术**（供跨会话续接）。

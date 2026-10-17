@@ -76,6 +76,16 @@ cd Low_MCU/new_mcu && docker run --rm --device=/dev/ttyACM0 -v "$PWD":/mcu -w /m
 # 打开 Configurator 会独占 /dev/ttyACM0 → 先关（ killall inav-configurator ）
 ```
 
+## 8.5 定高 / 解锁速查（2026-10-17）
+```bash
+# 定高开关：ch7 ≥1300 生效（FC: aux 4 3 2 1300 2100；现"中位即定高"，后续再拆出定点）
+# 解锁必要条件：① 油门杆到底(非中位) ② ch5 高位(≥1775；开关高档=2000) ③ 无其它阻止
+#   阻止原因看 status 的 "Arming disabled flags"：
+#   THR=油门没到底 / ARMSW=ch5 不在位 / DSHOTBEEPER=上电瞬态(几秒自消) / CLI=正在用 CLI/USB
+# 验证定高：解锁后 mon 的 z 会跟测距动（未解锁 z 恒 0，属设计）；
+#          黑匣子 flightModeFlags 含 8(bit3)=NAV_ALTHOLD 已生效，navFlags bit0=1=高度估计可信
+```
+
 ## 9. 黑匣子解码（i5，`tools/blackbox_decode.py`）
 ```bash
 python3 tools/blackbox_decode.py ~/Downloads/blackbox_log_*.TXT --list
