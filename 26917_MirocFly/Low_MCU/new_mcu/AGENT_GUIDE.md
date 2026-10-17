@@ -282,10 +282,10 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
 - **✅ 2m+ 验证（2026-10-17 晚2：`blackbox_logs/2M定高.TXT`，37.3s）**：8.42s 于 **2.2m** 拨入（切入时仍在爬升 ~0.65m/s）→ **无下沉**；+36cm 过冲、~2.3s 回稳，随后杆静止段高度波动 **±3cm**（10.7–11.2s）；中途爬至 **3.6m**：测距 200→360cm 连续、`navFlags` bit0 不掉 → **"2m 软墙"修复验证通过**。pitch 大角度（-9°/ -19°）均与打杆一一对应（机动，非失控）；稳态 ~4° 滚转偏置仍在（A1 待做）。**30s 静止悬停未做正式测试**（整场在杆上操作）→ 用户判定测试充分（10-17 收尾）→ 本项**免测关闭**；**定高部分 = 达标**。
 
 **📋 定点（POSHOLD）三道门核查（2026-10-17 晚，源码确证；目标：ch7 [1700,2100)=定点）**
-- **广告门（非阻塞）**：`updateActivatedModes()`（`rc_modes.c:253`）只看 aux 配置，与 `initActiveBoxIds` 的可用性过滤无关（同 ALTHOLD 先例）→ CLI 直接 `aux 5 9 2 1700 2100` 即生效（Configurator 列表可能不显示）。
+- **广告门（非阻塞）**：`updateActivatedModes()`（`rc_modes.c:253`）只看 aux 配置，与 `initActiveBoxIds` 的可用性过滤无关（同 ALTHOLD 先例）→ CLI 直接 `aux 5 11 2 1700 2100` 即生效（Configurator 列表可能不显示）。⚠️ **第二列 = 永久 ID（permanentId）不是 boxId**：POSHOLD=**11**（boxId 9 会静默清空槽位，见 §6-28）。
 - **解锁门**：配置 POSHOLD 后 `isUsingNAVModes`（`rc_modes.c:305`）生效 → 解锁要求 `navigationPositionEstimateIsHealthy()`（estPos≥USABLE && estAlt≥USABLE && `GPS_FIX_HOME`）。两条过法：① **YAW_HI 手势**（`nav_extra_arming_safety=ALLOW_BYPASS` 默认）：解锁时右偏航打满 + ch5 → 放行并置 `NAV_EXTRA_ARMING_SAFETY_BYPASSED`（`navigation.c:6381-6400`，同电周期内后续 re-arm 免手势）；② **手持建 home**：未解锁时 `updateHomePosition()` 在 estPos≥USABLE 时自动建 home（`navigation.c:4823`）→ 拿在纹理垫上方 ≥10cm 停数秒即可。
 - **估计门**：**必须 `set inav_allow_dead_reckoning = ON`**（光流位置修正的唯一开关：`navigation_pos_estimator_flow.c:108`；现 OFF）；光流健康（纹理垫/q≥35/0.3-0.6m）保证 `estVelStatus==TRUSTED`；`opflow_scale`（现 1.133）/`align_opflow` 待标定。
-- **模式优先级**：`navigation.c:6273` **POSHOLD 优先于 ALTHOLD**；**推荐重叠区间**（`aux 4 3 2 1300 2100` 不变 + 新增 `aux 5 9 2 1700 2100`）→ 光流不健康时自动落回 ALTHOLD 兜底（严格拆分存在"高位无兜底 → 掉回 IDLE"风险，验证稳定后再拆）。
+- **模式优先级**：`navigation.c:6273` **POSHOLD 优先于 ALTHOLD**；**推荐重叠区间**（`aux 4 3 2 1300 2100` 不变 + `aux 5 11 2 1700 2100`，**10-17 深夜已写入并 save**）→ 光流不健康时自动落回 ALTHOLD 兜底（严格拆分存在"高位无兜底 → 掉回 IDLE"风险，验证稳定后再拆）。
 - **激活条件**（`navigation.c:6024`）：`canActivatePosHold = estPos≥USABLE && estVel==TRUSTED && estHeading≥USABLE`；**不需要 GPS_FIX_HOME**（那只用于解锁检查）。
 
 **✅ 光流符号修复 + align 标定（2026-10-17 深夜）**
@@ -294,6 +294,7 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
 - **四组标定（磁带点位+聊天书签+快移慢回）**：CW0FLIP 下 **右→+Y / 左→−Y / 前→−X / 后→+X**（两两反号自洽）。
 - **结论**：目标约定 右→+X、前→−Y（`navigation_pos_estimator_flow.c:86-87`）→ 8 矩阵枚举唯一解 **`align_opflow = CW90`**（已 set+save+复读）。改后复测命中：右→**+X +739**、前→**−Y −1088** ✓。
 - **`opflow_scale` 现值 1.133**（默认 10.5）：**手持标定不可行**——传感器两头受限（慢 <~50°/s 死区截断：4×1m 慢滑行积分只记到 19%；快 >~400°/s 规格上限饱和虚高：快推积分 2–2.6× 为伪值）→ **维持 1.133，改"飞行中标定"**（低空已知距离平移对账）；详见 §6-27。
+- **P1 已写入（10-17 深夜，已复读）**：`inav_allow_dead_reckoning = ON` + `aux 5 11 2 1700 2100`（ch7≥1700=POSHOLD，永久ID=11）→ **下一步：台架（拔桨）验模式进出**（解锁用 YAW_HI 手势 + ch7 高位 → `navState` 6/7）→ 真机低空定点 + scale 飞行标定。
 
 **未做**：方案 B（给 `navReadyAltControl` 补测距分支，让 ALTHOLD 进 Configurator 列表）；`inav_reset_altitude` 改 `EACH_ARM`（可选）。
 
@@ -328,6 +329,7 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
 25. **光流手持标定方法论（2026-10-17 血泪）**：① 传感器**最小工作距离 8cm**——离地 1cm 时输出 ±1000+ 垃圾；② 质量门=进入 q≥35/退出 q≤10（滞回；门限作用于设备 quality，实测显示 q≈25+ 也可能有数据，勿一刀切）；③ 手持协议必须**地面磁带点位 + 单动作 + 聊天书签**（"按秒表分步"协议不可靠）；④ **快移+慢回**：目标方向产生单符号大脉冲（慢回低于量化门限）；⑤ 四方向需**两两反号自洽**才算测对。
 26. **opflow align 速查（`applySensorAlignment`，`boardalignment.c:112`）**：平面变换 CW0=(x,y)｜CW90=(y,−x)｜CW180=(−x,−y)｜CW270=(−y,x)｜CW0FLIP=(−x,y)｜CW90FLIP=(y,x)｜CW180FLIP=(x,−y)｜CW270FLIP=(−y,−x)。目标约定（`navigation_pos_estimator_flow.c:86-87`）：**右→+X、前→−Y**。本机（旧 CW0FLIP 实测 右→+Y/前→−X）→ 唯一解 **CW90**（CLI 值名 `CW90`）。
 27. **MTF-02P 有效区间与标定限制（2026-10-17 实测）**：慢于 ~50°/s（0.25m 高度 ≈0.2m/s）**死区截断**（4×1m、每段 7-8s 的慢滑行积分只记到 19%）；快于 ~400°/s（=7rad/s 规格上限）**饱和/模糊伪值**（手持快推积分虚高 2–2.6×）。**可靠区间 ≈100–400°/s**（0.25m 高 ≈0.44–1.7m/s）。→ 手持"已知距离"标定不可行；`opflow_scale` 维持 1.133，待**飞行中标定**。附带结论：**POSHOLD 对 <~0.2m/s 慢漂移天然不敏感**（死区物理限制，非参数问题）。
+28. **CLI `aux` 第二列 = 永久 ID（permanentId），不是 boxId（2026-10-17 踩坑）**：`cliAux` 用 `findBoxByPermanentId`（`cli.c:789`）解析；参数不足 4 个会**静默 memset 清空该槽**。对照表：ARM=0、ANGLE=1、ALTHOLD=3、**NAV POSHOLD=11**（boxId=9！）、NAV RTH=10、**MSP RC OVERRIDE=50**（boxId=41）。写 POSHOLD 用 `aux 5 11 2 1700 2100`。
 
 ---
 
