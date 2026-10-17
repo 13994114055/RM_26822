@@ -79,11 +79,21 @@ cd Low_MCU/new_mcu && docker run --rm --device=/dev/ttyACM0 -v "$PWD":/mcu -w /m
 ## 8.5 定高 / 解锁速查（2026-10-17）
 ```bash
 # 定高开关：ch7 ≥1300 生效（FC: aux 4 3 2 1300 2100；现"中位即定高"，后续再拆出定点）
+# 关键参数（10-17 晚）：nav_mc_hover_thr=1585（满电悬停实测）；inav_max_surface_altitude=400cm（高度源上限，"2m 软墙"已解）
+# 拨入定高后：油门杆 = 升降速率（零点 = 拨入时杆位；回中即停；压到底 ≈ 2m/s 快降）
 # 解锁必要条件：① 油门杆到底(非中位) ② ch5 高位(≥1775；开关高档=2000) ③ 无其它阻止
 #   阻止原因看 status 的 "Arming disabled flags"：
 #   THR=油门没到底 / ARMSW=ch5 不在位 / DSHOTBEEPER=上电瞬态(几秒自消) / CLI=正在用 CLI/USB
 # 验证定高：解锁后 mon 的 z 会跟测距动（未解锁 z 恒 0，属设计）；
 #          黑匣子 flightModeFlags 含 8(bit3)=NAV_ALTHOLD 已生效，navFlags bit0=1=高度估计可信
+```
+
+## 8.6 光流 / 定点速查（2026-10-17 深夜）
+```bash
+# FC 现状：align_opflow = CW90（10-17 四组标定，已复测验证）；opflow_scale = 1.133（待"沿尺1m"精标，粗估应≈2.5）
+# 板上只读观察：LD_LIBRARY_PATH=/mnt/system/usr/lib:/mnt/system/usr/lib/3rd ./flow_damp mon /dev/ttyS0 230400
+# 目标约定：右移→transX 正、前移→transY 负（mon 的 trans = flow − body）
+# 传感器最小工作距离 8cm（别贴地测）；纹理垫上方 30-40cm 数据最干净
 ```
 
 ## 9. 黑匣子解码（i5，`tools/blackbox_decode.py`）
