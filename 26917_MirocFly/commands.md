@@ -91,6 +91,7 @@ cd Low_MCU/new_mcu && docker run --rm --device=/dev/ttyACM0 -v "$PWD":/mcu -w /m
 ## 8.6 光流 / 定点速查（2026-10-17 深夜）
 ```bash
 # FC 现状：align_opflow = CW90（10-17 四组标定，已复测验证）；opflow_scale = 1.133（维持；手持不可靠：慢<50°/s 死区、快>400°/s 饱和 → 待飞行中标定）
+# P1 已写（10-17 深夜）：inav_allow_dead_reckoning=ON；aux 5 11 2 1700 2100（ch7≥1700=POSHOLD；⚠️aux 第二列=永久ID：POSHOLD=11）
 # 板上只读观察：LD_LIBRARY_PATH=/mnt/system/usr/lib:/mnt/system/usr/lib/3rd ./flow_damp mon /dev/ttyS0 230400
 # 目标约定：右移→transX 正、前移→transY 负（mon 的 trans = flow − body）
 # 传感器最小工作距离 8cm（别贴地测）；纹理垫上方 30-40cm 数据最干净
