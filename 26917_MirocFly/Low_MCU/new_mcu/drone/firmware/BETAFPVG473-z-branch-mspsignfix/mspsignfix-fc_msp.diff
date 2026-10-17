@@ -1,0 +1,17 @@
+--- Low_MCU/new_mcu/drone/inav-g4dbg/src/main/fc/fc_msp.c	2026-09-26 15:21:58.000000000 +0800
++++ Low_MCU/new_mcu/drone/inav-g4alt/src/main/fc/fc_msp.c	2026-10-17 18:56:31.447000000 +0800
+@@ -775,10 +775,10 @@
+     case MSP2_INAV_OPTICAL_FLOW:
+ #ifdef USE_OPFLOW
+         sbufWriteU8(dst, opflow.rawQuality);
+-        sbufWriteU16(dst, RADIANS_TO_DEGREES(opflow.flowRate[X]));
+-        sbufWriteU16(dst, RADIANS_TO_DEGREES(opflow.flowRate[Y]));
+-        sbufWriteU16(dst, RADIANS_TO_DEGREES(opflow.bodyRate[X]));
+-        sbufWriteU16(dst, RADIANS_TO_DEGREES(opflow.bodyRate[Y]));
++        sbufWriteU16(dst, (int16_t)lrintf(RADIANS_TO_DEGREES(opflow.flowRate[X])));
++        sbufWriteU16(dst, (int16_t)lrintf(RADIANS_TO_DEGREES(opflow.flowRate[Y])));
++        sbufWriteU16(dst, (int16_t)lrintf(RADIANS_TO_DEGREES(opflow.bodyRate[X])));
++        sbufWriteU16(dst, (int16_t)lrintf(RADIANS_TO_DEGREES(opflow.bodyRate[Y])));
+ #else
+         sbufWriteU8(dst, 0);
+         sbufWriteU16(dst, 0);

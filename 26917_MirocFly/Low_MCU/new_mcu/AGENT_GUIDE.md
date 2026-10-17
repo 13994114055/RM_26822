@@ -269,9 +269,31 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
 
 **✅ 首次定高试飞（2026-10-17，黑匣子 `~/Downloads/第一次定高.TXT`，5 段）**
 - **段1（12.5s，纯 ANGLE）**：起飞→悬停≈12s，姿态 ±2°、电机 ~1600，正常收尾；**电机长期不对称**（m0 恒低 ~50，疑 CoG/校准）→ 与"水平漂"相关。
-- **段4（15.5s，ANGLE+NAV_ALTHOLD）**：`flightModeFlags=10`（bit1=ANGLE｜bit3=NAV_ALTHOLD）→ **定高真实挂上并飞行**；`navFlags=1`（bit0=`estAltStatus==EST_TRUSTED`）→ **Z 分支在飞行中给出可信高度**；测距爬到 ~1.66m；**结尾 ~14.4s 翻滚坠机**（roll→70°、m1 饱和 2000、油门命令顶满但高度反降 → 疑撞击/失控，待归因）。
-- **黑匣子字段口径（踩坑记录）**：`mspOverrideFlags` bit0 = **MSP 接管数据流的 failsafe**（`rx/msp_override.c` 本地静态，**不是物理 RX 失控**！）bit1=接管激活；`navState`：1=`NAV_CTL_ALT`、3=`ALT|POS`；`navFlags`：bit0=alt TRUSTED / bit1=AGL / bit2=pos / bit3=terrain-follow / bit5=heading；`flightModeFlags`：bit1=ANGLE、bit3=NAV_ALTHOLD。
-- **待办**：坠机归因；"灵敏度高（轻打杆大幅动作，用户 1a）+ 水平漂（2）"→ 取干净悬停段黑匣子分析 (gyro/PID/rates) + CoG 配平。
+- **段4（15.5s，ANGLE+NAV_ALTHOLD）**：`flightModeFlags=10`（bit1=ANGLE｜bit3=NAV_ALTHOLD）→ **定高真实挂上并飞行**；`navFlags=1`（bit0=`estAltStatus==EST_TRUSTED`）→ **Z 分支在飞行中给出可信高度**；测距爬到 ~1.66m；**结尾 ~14.4s 翻滚坠机**（roll→70°、m1 饱和 2000、油门命令顶满但高度反降）→ **已归因：`nav_mc_hover_thr` 未标定（见本节末"✓ 坠机归因闭环"块）**。
+- **黑匣子字段口径（2026-10-17 晚修正）**：`mspOverrideFlags`（慢帧，`blackbox.c:1545`）**bit1=BOXMSPRCOVERRIDE 开关激活、bit0=接管数据流超时(failsafe)**（本地静态，**不是物理 RX 失控**）；`navState` = **`navPersistentId`**（`navigation.c:6568`）：**0=UNDEFINED / 1=IDLE / 2=ALTHOLD_INIT / 3=ALTHOLD_IN_PROGRESS**（**旧口径"1=NAV_CTL_ALT、3=ALT|POS"作废**）；`navFlags`：bit0=alt TRUSTED / bit1=AGL / bit2=pos / bit3=terrain-follow / bit5=heading / **bit6=isAdjustingPosition、bit7=isAdjustingAltitude、bit8=isAdjustingHeading（杆动时置位，`navigation.c:5995-5997`）**；`flightModeFlags`（=boxId 位）：bit0=ARM、bit1=ANGLE、bit3=NAV_ALTHOLD。
+- **待办（10-17 晚更新）**：2.5m 悬停 30s 验证（验收 ≤20cm）+ 1→3m 慢爬穿越 2m 边界；A1 地面项（水平/accel 核对、CoG、vbat 对表）；灵敏度暂缓；水平漂：定高≠定点（XY 无回路），先靠 A1 校准减小定向分量，真正锁定留 POSHOLD/上位机方案。
+
+**✅ 坠机归因闭环 + 修复 + 复测（2026-10-17 晚）**
+- **归因（定论）**：`nav_mc_hover_thr=1300` 未标定（实测满电悬停 ≈1585-1610）→ 空中拨入定高瞬间输出基准被置为 1300（`resetMulticopterAltitudeController()` 写死 hover_throttle）→ −300us 推力缺口 → 下沉 ~1.4m/s；叠加低电量 sag（3.39→3.04V）与漂移进软网收尾。Z 分支/高度估计全程无误。
+- **修复①**：`set nav_mc_hover_thr = 1585`（满电 ANGLE 悬停 10s，黑匣子实测 `rcCommand[3]`≈1584）→ save 持久化（已复读）。
+- **修复②**：`set inav_max_surface_altitude = 200 → 400`：原默认把 **>200cm 的测距样本一律判无效**（`navigation_pos_estimator_agl.c:57`）→ reliability 按 ~0.48s 衰减 → <0.33 时 Z 分支停止修正（`navigation_pos_estimator.c:689-690`）→ **2m 以上定高失反馈（"2m 软墙"）**。400cm 覆盖 2.5m 需求+余量。
+- **复测（黑匣子 `blackbox_logs/blackbox_log_2026-10-17_161306.TXT` seg4；seg2/seg3 为无定高杂段）**：拨入瞬间 `rcCommand[3]` 1630→**1580≈hover_thr**（旧行为→1300）；无下沉，+15cm 过冲（切入时仍在爬升的动量）、~1.0-1.2s 回稳，随后 37.5±3.0cm 稳定；**飞越凳子/箱子上空**时测距 z 阶跃（如 47→2cm）→ 油门/高度摆动（"地形跟随"固有盲区实飞实证；比赛巡航需留意：飞行剖面避开/高于障碍）。
+- **失效链路核实（A5，源码）**：① 上位机流超时（200ms+`failsafe_delay`0.5s≈0.7s）→ `rx.c:513` 门控关 → **静默回落物理遥控**（`msp_override.c`，设计即"RC 优先/硬件兜底"），**不触发主 failsafe**；重连后 0.2-0.7s 静默重新接管。② 物理 RC 丢失 → LAND=`activateForcedEmergLanding()`（`navigation.c:6945`）→ NAV 紧急降落（**依赖高度估计**；≤400cm 由 Z 分支支撑）→ 落地检测自动上锁；遥控恢复+打杆→中止。③ **"看门狗停发 RC 借 failsafe 落地"前提不成立**（停发只会回落物理遥控）→ phase 4 重新设计。
+- **✅ 2m+ 验证（2026-10-17 晚2：`blackbox_logs/2M定高.TXT`，37.3s）**：8.42s 于 **2.2m** 拨入（切入时仍在爬升 ~0.65m/s）→ **无下沉**；+36cm 过冲、~2.3s 回稳，随后杆静止段高度波动 **±3cm**（10.7–11.2s）；中途爬至 **3.6m**：测距 200→360cm 连续、`navFlags` bit0 不掉 → **"2m 软墙"修复验证通过**。pitch 大角度（-9°/ -19°）均与打杆一一对应（机动，非失控）；稳态 ~4° 滚转偏置仍在（A1 待做）。**30s 静止悬停未做正式测试**（整场在杆上操作）→ 用户判定测试充分（10-17 收尾）→ 本项**免测关闭**；**定高部分 = 达标**。
+
+**📋 定点（POSHOLD）三道门核查（2026-10-17 晚，源码确证；目标：ch7 [1700,2100)=定点）**
+- **广告门（非阻塞）**：`updateActivatedModes()`（`rc_modes.c:253`）只看 aux 配置，与 `initActiveBoxIds` 的可用性过滤无关（同 ALTHOLD 先例）→ CLI 直接 `aux 5 9 2 1700 2100` 即生效（Configurator 列表可能不显示）。
+- **解锁门**：配置 POSHOLD 后 `isUsingNAVModes`（`rc_modes.c:305`）生效 → 解锁要求 `navigationPositionEstimateIsHealthy()`（estPos≥USABLE && estAlt≥USABLE && `GPS_FIX_HOME`）。两条过法：① **YAW_HI 手势**（`nav_extra_arming_safety=ALLOW_BYPASS` 默认）：解锁时右偏航打满 + ch5 → 放行并置 `NAV_EXTRA_ARMING_SAFETY_BYPASSED`（`navigation.c:6381-6400`，同电周期内后续 re-arm 免手势）；② **手持建 home**：未解锁时 `updateHomePosition()` 在 estPos≥USABLE 时自动建 home（`navigation.c:4823`）→ 拿在纹理垫上方 ≥10cm 停数秒即可。
+- **估计门**：**必须 `set inav_allow_dead_reckoning = ON`**（光流位置修正的唯一开关：`navigation_pos_estimator_flow.c:108`；现 OFF）；光流健康（纹理垫/q≥35/0.3-0.6m）保证 `estVelStatus==TRUSTED`；`opflow_scale`（现 1.133）/`align_opflow` 待标定。
+- **模式优先级**：`navigation.c:6273` **POSHOLD 优先于 ALTHOLD**；**推荐重叠区间**（`aux 4 3 2 1300 2100` 不变 + 新增 `aux 5 9 2 1700 2100`）→ 光流不健康时自动落回 ALTHOLD 兜底（严格拆分存在"高位无兜底 → 掉回 IDLE"风险，验证稳定后再拆）。
+- **激活条件**（`navigation.c:6024`）：`canActivatePosHold = estPos≥USABLE && estVel==TRUSTED && estHeading≥USABLE`；**不需要 GPS_FIX_HOME**（那只用于解锁检查）。
+
+**✅ 光流符号修复 + align 标定（2026-10-17 深夜）**
+- **bug**：`fc_msp.c:778-781` 原用 `sbufWriteU16(dst, RADIANS_TO_DEGREES(...))`——float→uint16 **负值饱和为 0** → MSP2 光流遥测"永不负值"（全向动作只见单符号）。输入链路（`msp_protocol_v2_sensor_msg.h` int32 有符号）与工具端（`flow_damp.cpp` int16 解析）本来都对。
+- **修复**：4 行改 `(int16_t)lrintf(RADIANS_TO_DEGREES(...))` → 重编刷 hex（**新版本 `Oct 17 2026 / 19:02:04 (7e2d65a5)`**、FLASH1 458394B；回退 `firmware/BETAFPVG473-z-branch-e112ce42/`）。刷后验证：版本/传感器/配置四项全过；手持测试负值正常出现。
+- **四组标定（磁带点位+聊天书签+快移慢回）**：CW0FLIP 下 **右→+Y / 左→−Y / 前→−X / 后→+X**（两两反号自洽）。
+- **结论**：目标约定 右→+X、前→−Y（`navigation_pos_estimator_flow.c:86-87`）→ 8 矩阵枚举唯一解 **`align_opflow = CW90`**（已 set+save+复读）。改后复测命中：右→**+X +739**、前→**−Y −1088** ✓。
+- **`opflow_scale` 现值 1.133**（默认 10.5）：粗估距离偏大 ~2–2.5× → 待"沿尺 1m 慢速"积分精标。
 
 **未做**：方案 B（给 `navReadyAltControl` 补测距分支，让 ALTHOLD 进 Configurator 列表）；`inav_reset_altitude` 改 `EACH_ARM`（可选）。
 
@@ -300,6 +322,11 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
 19. **无 GPS 时配置 POSHOLD/RTH/WP 会拦截解锁（2026-10-15 核实）**：`isUsingNAVModes` 只要配置了 **POSHOLD/RTH/COURSEHOLD/CRUISE/WP** 任一开关即为真（`fc/rc_modes.c:305`）；解锁要求 `navigationPositionEstimateIsHealthy()`＝`estPosStatus>=EST_USABLE && estAltStatus>=EST_USABLE && STATE(GPS_FIX_HOME)`（`navigation/navigation.c:6376`），否则返回 `NAV_ARMING_BLOCKER_MISSING_GPS_FIX`（`:6392`）。无 GPS 时 `GPS_FIX_HOME` 依赖“解锁前由光流等建立 home”（要求 `estPosStatus>=EST_USABLE`）。**⚠️ ALTHOLD 不在该列表 → 定高不受影响**——这正是“先定高、定点后置”的原因。另：`eph` 仅在 XY 传感器更新超时时按 100/s 增长（上限 `inav_max_eph_epv`＝1000cm），**光流健康是定点稳定的前提**。`nav_extra_arming_safety=ALLOW_BYPASS`（默认）可用 YAW_HI 杆位临时绕过（无飞手时不可用）。
 20. **SURFACE（地表跟随）本板不可用——两处硬依赖气压计（2026-10-17 核实）**：① 模式盒广告条件 `sensors(SENSOR_BARO) && sensors(SENSOR_RANGEFINDER)`（`fc/fc_msp_box.c:226`）；② 地形跟随时高度控制器改读 `posControl.actualState.agl`（`navigation/navigation.c`：`terrainFollow ? agl : abs`），而 AGL 估计要求 `EST_BARO_VALID`（`navigation_pos_estimator_agl.c:83`）→ 无 baro 时 `aglAlt` 恒 0。**定高结论：用 ALTHOLD（Z 分支），平地场景与 SURFACE 等价**。
 21. **解锁排查速查（2026-10-16 实测踩坑）**：`status` 的 `Arming disabled flags` 是权威判据——`ARMSW`=ch5 不在解锁位（需 ≥1775，实测开关高档=2000）；**`THR`=油门杆必须收到最低（≈1000，非中位）**；`DSHOTBEEPER`=上电初期蜂鸣器瞬态（几秒自消）；`CLI`=USB CLI 会话中禁解锁。另：**未解锁时零点持续跟随测距 → `MSP_ALTITUDE` 的 `z` 恒≈0**（`WAS_EVER_ARMED` 前速度不积分 + 零点跟随，见 §5.7）→ **验证 z 必须"先解锁"**。TX 未开机时通道读数为失控保护值（ch5 曾见 1750，勿据此调区间）。
+22. **黑匣子 `navState` 是 `navPersistentId`，不是控制位掩码（2026-10-17 更正）**：0=UNDEFINED / 1=IDLE / 2=ALTHOLD_INIT / 3=ALTHOLD_IN_PROGRESS（`navigation.c:6568`）；`mspOverrideFlags` bit1=接管开关激活、bit0=接管流超时。详见 §5.7。
+23. **拔上位机串口 ≠ LAND（2026-10-17 源码核实）**：接管流超时（~0.7s）只把控制权**静默回落到物理遥控**（`rx.c:513` 门控）；FC 主 failsafe（LAND）只由**物理 RC 链路丢失**触发，走紧急降落状态机且**依赖高度估计**。"上位机停发 RC 借 failsafe 落地"不成立（看门狗需重新设计）。
+24. **MSP2_INAV_OPTICAL_FLOW 遥测丢符号（2026-10-17 已修，固件 `7e2d65a5`）**：`fc_msp.c:778-781` 曾用 `sbufWriteU16(dst, RADIANS_TO_DEGREES(...))`——float→uint16 **负值饱和为 0**；对照同文件有符号字段正确写法（`(int16_t)lrintf(...)`，`:603/:755`）。症状="数据永不负值"（所有方向只现一种符号）；输入链路与工具端本来是对的。**修复=显式转换 + 重编刷 hex**。
+25. **光流手持标定方法论（2026-10-17 血泪）**：① 传感器**最小工作距离 8cm**——离地 1cm 时输出 ±1000+ 垃圾；② 质量门=进入 q≥35/退出 q≤10（滞回；门限作用于设备 quality，实测显示 q≈25+ 也可能有数据，勿一刀切）；③ 手持协议必须**地面磁带点位 + 单动作 + 聊天书签**（"按秒表分步"协议不可靠）；④ **快移+慢回**：目标方向产生单符号大脉冲（慢回低于量化门限）；⑤ 四方向需**两两反号自洽**才算测对。
+26. **opflow align 速查（`applySensorAlignment`，`boardalignment.c:112`）**：平面变换 CW0=(x,y)｜CW90=(y,−x)｜CW180=(−x,−y)｜CW270=(−y,x)｜CW0FLIP=(−x,y)｜CW90FLIP=(y,x)｜CW180FLIP=(x,−y)｜CW270FLIP=(−y,−x)。目标约定（`navigation_pos_estimator_flow.c:86-87`）：**右→+X、前→−Y**。本机（旧 CW0FLIP 实测 右→+Y/前→−X）→ 唯一解 **CW90**（CLI 值名 `CW90`）。
 
 ---
 
