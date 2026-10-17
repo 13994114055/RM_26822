@@ -293,7 +293,7 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
 - **修复**：4 行改 `(int16_t)lrintf(RADIANS_TO_DEGREES(...))` → 重编刷 hex（**新版本 `Oct 17 2026 / 19:02:04 (7e2d65a5)`**、FLASH1 458394B；回退 `firmware/BETAFPVG473-z-branch-e112ce42/`）。刷后验证：版本/传感器/配置四项全过；手持测试负值正常出现。
 - **四组标定（磁带点位+聊天书签+快移慢回）**：CW0FLIP 下 **右→+Y / 左→−Y / 前→−X / 后→+X**（两两反号自洽）。
 - **结论**：目标约定 右→+X、前→−Y（`navigation_pos_estimator_flow.c:86-87`）→ 8 矩阵枚举唯一解 **`align_opflow = CW90`**（已 set+save+复读）。改后复测命中：右→**+X +739**、前→**−Y −1088** ✓。
-- **`opflow_scale` 现值 1.133**（默认 10.5）：粗估距离偏大 ~2–2.5× → 待"沿尺 1m 慢速"积分精标。
+- **`opflow_scale` 现值 1.133**（默认 10.5）：**手持标定不可行**——传感器两头受限（慢 <~50°/s 死区截断：4×1m 慢滑行积分只记到 19%；快 >~400°/s 规格上限饱和虚高：快推积分 2–2.6× 为伪值）→ **维持 1.133，改"飞行中标定"**（低空已知距离平移对账）；详见 §6-27。
 
 **未做**：方案 B（给 `navReadyAltControl` 补测距分支，让 ALTHOLD 进 Configurator 列表）；`inav_reset_altitude` 改 `EACH_ARM`（可选）。
 
@@ -327,6 +327,7 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
 24. **MSP2_INAV_OPTICAL_FLOW 遥测丢符号（2026-10-17 已修，固件 `7e2d65a5`）**：`fc_msp.c:778-781` 曾用 `sbufWriteU16(dst, RADIANS_TO_DEGREES(...))`——float→uint16 **负值饱和为 0**；对照同文件有符号字段正确写法（`(int16_t)lrintf(...)`，`:603/:755`）。症状="数据永不负值"（所有方向只现一种符号）；输入链路与工具端本来是对的。**修复=显式转换 + 重编刷 hex**。
 25. **光流手持标定方法论（2026-10-17 血泪）**：① 传感器**最小工作距离 8cm**——离地 1cm 时输出 ±1000+ 垃圾；② 质量门=进入 q≥35/退出 q≤10（滞回；门限作用于设备 quality，实测显示 q≈25+ 也可能有数据，勿一刀切）；③ 手持协议必须**地面磁带点位 + 单动作 + 聊天书签**（"按秒表分步"协议不可靠）；④ **快移+慢回**：目标方向产生单符号大脉冲（慢回低于量化门限）；⑤ 四方向需**两两反号自洽**才算测对。
 26. **opflow align 速查（`applySensorAlignment`，`boardalignment.c:112`）**：平面变换 CW0=(x,y)｜CW90=(y,−x)｜CW180=(−x,−y)｜CW270=(−y,x)｜CW0FLIP=(−x,y)｜CW90FLIP=(y,x)｜CW180FLIP=(x,−y)｜CW270FLIP=(−y,−x)。目标约定（`navigation_pos_estimator_flow.c:86-87`）：**右→+X、前→−Y**。本机（旧 CW0FLIP 实测 右→+Y/前→−X）→ 唯一解 **CW90**（CLI 值名 `CW90`）。
+27. **MTF-02P 有效区间与标定限制（2026-10-17 实测）**：慢于 ~50°/s（0.25m 高度 ≈0.2m/s）**死区截断**（4×1m、每段 7-8s 的慢滑行积分只记到 19%）；快于 ~400°/s（=7rad/s 规格上限）**饱和/模糊伪值**（手持快推积分虚高 2–2.6×）。**可靠区间 ≈100–400°/s**（0.25m 高 ≈0.44–1.7m/s）。→ 手持"已知距离"标定不可行；`opflow_scale` 维持 1.133，待**飞行中标定**。附带结论：**POSHOLD 对 <~0.2m/s 慢漂移天然不敏感**（死区物理限制，非参数问题）。
 
 ---
 
