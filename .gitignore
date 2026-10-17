@@ -41,6 +41,7 @@ desktop.ini
 sdcard_images/
 26917_MirocFly.tar
 DM_H7_lab-main/
+z杂物间/
 
 # ========== Keil/IAR 编译中间产物（本地保留，不入库） ==========
 *.crf
