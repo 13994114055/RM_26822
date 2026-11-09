@@ -3,7 +3,17 @@
 > 本目录是 MirocFly 的**下位机（飞行控制器，执行器）**开发区。
 > 上位机（LicheeRV Nano，视觉/决策）在 `../Host_Lichee_RV_Nano/`。
 
-## 当前状态（截至 2026-10-09）
+## 目录与当前状态（2026-11-04）
+
+| 目录 | 状态 | 说明 |
+|---|---|---|
+| `archive_at32/` | ⚠️ **冻结** | AT32F435 空心杯方案（升力不足淘汰） |
+| `BateFPV_G473/` | ⚠️ **冻结（2026-11-04）** | BetaFPV G473 + 自移植 INAV 10.0.0（G4）阶段。含全部历史文档/固件/配置。<br>**原目录名 `new_mcu` 已更名为 `BateFPV_G473`**——历史文档里出现的 `new_mcu/...` 路径，一律按 `BateFPV_G473/...` 理解。 |
+| **`Lyi_F722/`** | ★ **当前** | 新飞控（F722）开发日志区，见 `Lyi_F722/README.md` |
+
+**为什么换**：旧板 G473 阶段已跑通定高/光流/权限门，但受限于 **512KB Flash、无气压计、需自研 Z 分支**；新板 F722 平台自带气压计等，可回归标准固件、减少自研分支。换板后旧板**只读参考，不再改配置**。
+
+## 历史状态：G473 阶段（已冻结，2026-11-04 起）
 
 - **原 AT32F435 方案已淘汰**：直驱空心杯实测升力约 59g < 整机 76g，**无法起飞**（历史存于 `archive_at32/`）。
 - **新主控 = BetaFPV G473**（STM32G474，BMI270 IMU，四合一 DSHOT ESC）。与**此前烧毁的板子同款**，已**重新购入**。
@@ -23,11 +33,15 @@
 ```
 Low_MCU/
 ├── README.md                 # 本文件（下位机总览）
-├── archive_at32/             # ⚠️ AT32 方案历史（冻结，不再更新）
-│   ├── agent_at32.md              # AT32 开发经验全集（方案更替原因/接口/INAV 配置/教训）
-│   ├── AT32F435CGU7_project/      # AT32 Workbench 骨架（非可飞）
-│   └── 下位机MCU手册.pdf/.docx
-└── new_mcu/                  # 新主控 BetaFPV G473 工作区（详见 new_mcu/README.md）
+├── archive_at32/             # ⚠️ 冻结：AT32 方案历史（agent_at32.md 等）
+├── BateFPV_G473/             # ⚠️ 冻结（2026-11-04）：G473 + 自移植 INAV 阶段
+│   ├── AGENT_GUIDE.md             #   该阶段权威文档（历史，含 §5.10/§6 坑清单）
+│   ├── README.md
+│   ├── connection/                #   上下位机对接 + fccli.py / set_hover_thr.sh
+│   └── drone/                     #   inav/ inav-g4dbg/ firmware/ config/ …
+└── Lyi_F722/                 # ★ 当前：新飞控 F722 开发日志（见 Lyi_F722/README.md）
+    ├── README.md                  #   板卡/固件/接口/日志索引
+    └── logs/                      #   按日期记日志
     ├── README.md
     ├── AGENT_GUIDE.md             # ★ 下位机开发指导 + 交接（权威文档，新 AI 先读）
     ├── connection/                # 上下位机对接方案 + 工具
@@ -98,5 +112,5 @@ docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_
 - 新主控详情 / 目录 / 待办：`new_mcu/README.md`
 - 对接方案 / 接线 / 测试：`new_mcu/connection/README.md`
 - 上位机：`../Host_Lichee_RV_Nano/`（总览、`AGENT_GUIDE.md`、操作手册 `diary.md`）
-- 项目总览 / AI 上下文：`../README.md`、`../agent.md`
+- 项目总览 / AI 上下文：`../README.md`、`../AGENTS.md`
 - AT32 历史与教训：`archive_at32/agent_at32.md`

@@ -1,0 +1,3 @@
+version
+# Betaflight / STM32F722 (F722) 2026.6.1 Sep  9 2026 / 20:01:02 (51a4b22fa) MSP API: 1.48
+# board: manufacturer_id: LYI, board_name: LYIF722DUAL

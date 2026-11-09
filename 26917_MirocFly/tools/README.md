@@ -1,5 +1,7 @@
 # tools/ — MirocFly 调试/分析工具集
 
+> ⚠️ **IP 变更（2026-11-03）**：板子地址现为 `10.117.42.1`；文中 `10.222.2.1` 为历史值，已作废。
+
 > 本项目（上位机 LicheeRV ↔ 下位机 BetaFPV G473/INAV）调试、联调与复盘用的**独立小工具**。
 > 与实验代码解耦；多数只在 **i5** 或 **LicheeRV** 上直接跑。中文注释。
 
@@ -64,4 +66,4 @@ ssh root@10.222.2.1 '/root/mirocfly/msp_probe /dev/ttyS0 230400'   # 期望 TOTA
 ## 相关文档
 - 上位机：`../Host_Lichee_RV_Nano/AGENT_GUIDE.md`
 - 下位机：`../Low_MCU/new_mcu/AGENT_GUIDE.md`、`../Low_MCU/new_mcu/connection/README.md`
-- AI 上下文：`../agent.md`
+- AI 上下文：`../AGENTS.md`

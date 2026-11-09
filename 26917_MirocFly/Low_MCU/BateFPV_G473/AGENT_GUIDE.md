@@ -1,0 +1,478 @@
+> ⚠️ **【已冻结 · 2026-11-04】** 本目录对应的 BetaFPV G473 已更换为 **Lyi F722**（见 `../Lyi_F722/README.md`）。
+> 本文只作**历史参考**：不再改配置、不再刷固件、不再飞。文中 `new_mcu/` 路径即本目录（已改名）。
+> 仍有效的通用经验：§5.7 定高 Z 分支思路、§5.10 定点结案、§6 坑清单（CLI aux 永久 ID、battery_profile 级参数、exit/save 重启、ch7 连拨陷阱等）。
+>
+> ⭐ **【第一要务 · 教学优先】** 所有的开发都是以学习为目的，让我学会东西为前提，而并非把目标完成放在第一位，我要穷究原理，哪怕工期可能延误，我会多抽出其他时间，所以你要以教学和传授方法知识为第一要务。
+> 📖 **开工前必读**：`../../../agent问答示例.md` —— 先学习其中的逻辑与思路（要做什么 → 为什么 → 由谁做基础），并作为**贯穿始终的回答方式**。
+
+# 下位机（飞控）开发指导 + 交接 — BetaFPV G473 / INAV 10.0.0(G4)
+
+> 本文件是 **MirocFly 下位机（飞行控制器）** 的**权威开发指导 + 交接文档**。
+> 上位机（LicheeRV Nano，视觉/决策）见 `../../Host_Lichee_RV_Nano/AGENT_GUIDE.md`。
+> 最后更新：2026-10-20（§5.10：定点自激根因 = 光流 scale 严重偏差；§6-39~44）。
+
+---
+
+## 0. 给新 AI / 新同学的交接说明（先读这段）
+
+### 你是谁、要做什么
+你接手的是 **MirocFly** 项目的**下位机（飞控）**部分：把一块 **BetaFPV G473** 板（跑自研移植的 **INAV 10.0.0 for STM32G4**）与上位机 **LicheeRV Nano** 对接起来，最终实现**自主视觉打击**（上位机做视觉/决策，下位机做稳定飞行/执行）。
+
+### 工作约定（务必遵守）
+- **教学优先**：用户是学生，目标是**面试与项目成长**。多解释"**为什么**"、上岗面试会怎么问，不要只给结论。
+- **别吹捧、不迁就沉没成本**：只从"就业 + 项目成长性"客观评估；发现方案不对要直说。
+- **先汇报再执行**：每个小阶段先给用户汇报思路/预期结果，得到确认再动手（尤其是刷固件、改配置、编译）。
+- **别污染原始文件**：需要改动时复制到新目录（如 `inav-g4dbg/`），保留原树。
+- **进展即提交**：每完成一小步就 `commit` + `push`（远程 `git@github.com:13994114055/RM_26822.git`，分支 `main`）。
+- **中文交流**。
+
+### 机器分工
+| 机器 | 地址/入口 | 干什么 |
+|---|---|---|
+| **i5 / Arch**（本机） | 工作目录 `~/code/26822_RM` | 代码、交叉编译、量化、刷固件、配置 FC |
+| **LicheeRV Nano**（上位机） | `ssh root@10.222.2.1`（USB-RNDIS 网卡） | 运行视觉/决策，与 FC 通过 UART0 通信 |
+| 4060 / Win11 | — | **仅**用于模型训练 |
+
+> ssh 到 LicheeRV：`ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no root@10.222.2.1`
+
+### 三分钟上手
+1. 读本文件 → 读 `connection/README.md`（对接方案）→ 读 `../README.md`（总览）。
+2. FC 连线：拔桨，USB 接 i5（`/dev/ttyACM0`），用 `connection/fccli.py`（docker `--device`）读 `status`。
+3. 上位机链路：LicheeRV `UART0(/dev/ttyS0, A16/A17) @230400` ↔ FC `UART2`，**TX/RX 交叉**。
+4. 当前卡点：**ANGLE 模式振荡**、**CoG 偏左导致起飞左翻**、**黑匣子日志待分析**、**光流/测距待验证**（见第 5 节）。
+
+---
+
+## 1. 任务背景
+
+- **项目**：MirocFly — 面向"自主视觉打击"的小型无人机。上位机（LicheeRV Nano，SG2002）负责摄像头推理、目标决策；下位机（飞控）负责姿态稳定与执行。
+- **接口抽象**：上位机给下位机下发 `TargetInfo{ 偏移X, 偏移Y, 面积Area(∝1/距离²), 状态Status }`；链路层只换编码器（近期用 **MSP 摇杆值**，远期换自定义帧 `AA 55 | X | Y | Area | Status | CRC8`）。
+- **RC 优先**：物理 CRSF 直连为准，**拨杆切换自主/手动**（`MSP RC Override`，模式**永久 ID 50**）；上位机停发则回落到物理 RC。**开关映射（2026-10-12 定稿，实验20）**：`ch5`=ARM；**`ch6>1300 或 ch8>1300`=上位机接管三轴**（同 modeId 挂两条 aux = **OR**）；`ch8>900`=ANGLE；`ch6`=追踪范式（全 B）；`ch7[1300,1700)`=定点 / `[1700,2100)`=定高。
+
+---
+
+## 2. 硬件与固件现状
+
+### 2.1 主控定型
+- **BetaFPV G473**：STM32G474（512KiB flash，168MHz PLLR-HSE），BMI270 IMU（SPI1），四合一 DSHOT ESC，板载 ELRS，板载 W25N01G SPI3 blackbox（16M）。与**此前烧毁的板子同款**，已重新购入。
+- 板级细节（UART/电机/I2C/blackbox 引脚）见 `README.md`「板级信息」表。
+
+### 2.2 固件 = 自研移植的 INAV 10.0.0（STM32G4）
+- ⚠️ **官方 INAV 不支持 STM32G4**（只有 F4/F7/H7/AT32），本固件是把 INAV **移植到 G4** 的成果。版本行：`INAV/BETAFPVG473 10.0.0 (3d2c8fd) Dev`。
+- ✅ **已刷入板子**（原厂 Betaflight 4.5.1 → 我们的 INAV）；`GYRO/ACC=BMI270 OK`。
+- ✅ **可在 i5 本机重编**（`drone/inav-g4dbg/`，见第 3 节）。
+- 体积紧张：`FLASH 458682B/480KiB = 93.3%`、`RAM 80.2%`；target 里已 `#undef` 掉动态滤波/FrSkyOSD 等省 flash（→ 滤波策略要保守）。
+- 移植改动归档：`drone/inav-g4-port.patch`（相对上游 `3d2c8fd`，31 改 + 20 新文件，不含 STM32G4 厂商库与 build 产物）。
+
+### 2.3 已完成 / 当前状态（截至 2026-10-09）
+- ✅ 固件刷写、板级校验。
+- ✅ 上下位机对接配置写入并持久化（UART2=MSP / UART3=CRSF / UART4=MTF-02P）。
+- ✅ **上位机↔下位机 MSP 链路实测打通**（LicheeRV UART0 ↔ FC UART2 @230400）。
+- ✅ EzTune 关闭 + INAV 默认 PID/滤波已应用（见 5.2）。
+- ⏳ 黑匣子日志已导出待分析；真机联调未完成（振荡/CoG/光流待解决）。
+
+---
+
+## 3. 工程环境与工具链（i5 / Arch）
+
+### 3.1 编译 G4 固件
+```bash
+# 在 Low_MCU/new_mcu/drone/inav-g4dbg/ 下
+export CMAKE_POLICY_VERSION_MINIMUM=3.5
+cmake -B build -G Ninja -DCOMPILER_VERSION_CHECK=OFF   # 必须关校验，否则去 Arm 官网下 13.2 工具链
+ninja -C build BETAFPVG473                             # -> build/bin/BETAFPVG473.elf / .hex
+```
+- 依赖：`arm-none-eabi-gcc`（本机 16.2.0）、`cmake`、`ninja`。
+- `inav-g4dbg/` 是 `drone/inav/`（Windows 原树）的副本（去 `.git`/`build-*`），**gitignore**，仅用于 i5 改/编固件，**不污染原树**。
+
+### 3.2 刷固件（USB DFU）
+1. **按住 BOOT 键插 USB** → 进 DFU（设备 `0483:df11`）。
+2. 用容器里的 `dfu-util`：
+```bash
+docker run --rm --privileged -v /dev/bus/usb:/dev/bus/usb --network host tpuc_mlir:latest bash -lc \
+  'apt-get update -qq && apt-get install -y -qq dfu-util && \
+   dfu-util -d 0483:df11 -a 0 -s 0x08000000:leave -D /fw/BETAFPVG473-...bin'
+```
+- 可烧写文件：`drone/firmware/BETAFPVG473-motor-af-i2c-fix/`（hex/bin/elf，地址 `0x08000000`）。
+- ⚠️ **刷机与配置区（2026-10-15 实测核实）**：FLASH 布局 = `0x08000000` 16K(code) + **`0x08004000` 16K(配置区)** + `0x08008000` 480K(code)。**`.bin` 覆盖配置区且该区为零填充 → 刷 bin 会清零配置**；**`.hex` 不含配置区记录 → 刷 hex 保留配置**。→ **优先刷 `.hex`**（`dfu-util ... -D xxx.hex`）。
+- **刷前必做**：把板上配置实读存档（CLI `diff all`）——权威恢复文件：`drone/firmware/INAV_10.0.0_cli_20261015_full-diffall.txt`（含 10-14 正装改动，可整段回粘 + `save`）。
+- **当前固件备份状态**：`firmware/BETAFPVG473-motor-af-i2c-fix/`（sha256 见其 README）与 `inav/build-g4-final/`（`bin/` + `inav_10.0.0_*.bin/hex`）**各一份、md5 完全一致**，且与板上在跑版本一致（版本串构建时间 `Sep 26 2026 / 18:30:49`）。
+- **🔙 回退（rollback，2026-10-15 定）**：若新固件不可用 → **刷回当前在飞版**：
+  `firmware/BETAFPVG473-motor-af-i2c-fix/BETAFPVG473-inav-10.0.0-motor-af-i2c-fix.hex`（同一 `dfu-util` 命令，只换文件名；**`.hex` 保留配置**）。验证：刷后 `fccli.py --cmd version` 应显示 `Sep 26 2026 / 18:30:49`、`status` 中 `GYRO/ACC=BMI270 OK`。配置若丢 → 回粘 `firmware/INAV_10.0.0_cli_20261015_full-diffall.txt` + `save`。
+
+### 3.3 配置 / 调试 FC（USB VCP）
+- 脚本：`connection/fccli.py`（纯 stdlib，通过 USB VCP 与 FC CLI 交互）。
+- 权限：`/dev/ttyACM0` 属 `root:uucp`，用户不在 `uucp` 组 → 走 **docker `--device`** 免 sudo。
+```bash
+docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_mlir:latest \
+  python3 fccli.py --cmd 'version' --cmd 'status'
+docker run --rm --device=/dev/ttyACM0 -v <new_mcu>:/mcu -w /mcu/connection tpuc_mlir:latest \
+  python3 fccli.py --config /mcu/drone/config/g473_msprc.txt
+```
+- ⚠️ **打开 INAV Configurator 会独占 `/dev/ttyACM0`**，与 `fccli.py` 冲突 → 先 `pkill -f inav-configurator`。
+- Configurator：`/home/user/Zip_app/INAV_Configurator-linux-x64-10.0.0/inav-configurator`（10.0.0-RC1）。
+
+### 3.4 上位机链路验证
+- `tools/msp_probe.c`：在 LicheeRV 上跑，验证 FC↔上位机 MSP（ATTITUDE/STATUS/RAW_IMU，LINK OK）。需交叉编译（RISC-V）。
+
+---
+
+## 4. 上下位机对接（接口已定稿并落地）
+
+> 完整方案/接线/验证清单见 **`connection/README.md`**；可粘贴配置见 **`drone/config/g473_msprc.txt`**。
+
+| 用途 | G473 口 | 引脚 | 对端 | 参数 |
+|---|---|---|---|---|
+| **上位机 MSP** | UART2 | PA2/PA3 | LicheeRV **UART0 `/dev/ttyS0`**（A16/A17） | **230400** |
+| **CRSF 接收机** | UART3 | PB10/PB11 | 遥控接收机 | auto |
+| **光流+测距** | UART4 | PC10/PC11 | MTF-02P | 115200 |
+| 配置/调试 | USB VCP | — | i5 | 115200 |
+| （释放名额） | UART1 | — | 空 | 仅 RX，接不了外设，**必须清空** |
+
+- ✅ **2026-10-09 实测打通**：LicheeRV `UART0(/dev/ttyS0, A16/A17) @230400` ↔ FC `UART2(MSP)`，**TX/RX 必须交叉**。
+- 要点：**UART1(ttyS1) 与板载 Wi-Fi/BT(AIC8800) 共用引脚，不可用**；**UART0 需先释放 console getty**（板内 `/etc/inittab` 注释相应行）。
+- ⚠️ **必须 `serial 0 0 ...` 清空 UART1**：INAV 限 **最多 3 个 MSP 端口**（`MAX_MSP_PORT_COUNT=3`）；默认 VCP+UART1 已占 2，再加 UART2+UART4 会超限 → 启动时 serial 配置被**整体重置**（表现为"存不住"）。
+- MTF-02P 走 **MSP**：`opflow_hardware=MSP` + `rangefinder_hardware=MSP`（INAV 原生解析 `MSP2_SENSOR_OPTIC_FLOW`/`MSP2_SENSOR_RANGEFINDER`）。
+- 策略：保留物理 CRSF；上位机 `MSP RC Override`（永久 ID 50）。**2026-10-12（实验20）改 aux**：`ch5`=ARM(`aux 0 0 0 1775 2100`)；`ch6>1300`→override(`aux 1 50 1 1300 2100`)；`ch8>1300`→override(`aux 2 50 3 1300 2100`，与上条 **OR**)；`ch8>900`→ANGLE(`aux 3 1 3 900 2100`，注：800 被 INAV 下限钳到 900)；**删 HORIZON**。**`msp_override_channels=7`**（只接管 roll/pitch/yaw，油门留飞行员）。**⚠️ 掩码位序 = 内部通道号 AERT（`ROLL=0 PITCH=1 YAW=2 THROTTLE=3`），非负载 AETR；`11` 会误接管油门→切油**。`failsafe_procedure`：**2026-10-15 实读确认为 `LAND`**（慢降、不返航），配置稿已同步。配置见 `drone/config/g473_msprc.txt`。
+
+---
+
+## 5. 当前进度与已知问题
+
+### 5.1 ✅ 已解决
+- 固件刷写 + 板级校验（BMI270）。
+- 上下位机 MSP 链路打通（UART0/ttyS0@230400）。
+- serial 配置持久化 bug（根因 `MAX_MSP_PORT_COUNT=3`，解法清空 UART1）。
+- UART1/ttyS1 与 AIC8800 冲突诊断；释放 UART0 console。
+- ✅ **"离地即翻/自旋"根因（2026-10-10）**：**电机输出编号 M1–M4 与物理接线错位**（飞控倒装 180° 重装后未重映射）→ 姿态修正发给了错误电机 → 发散（翻/自旋）。**修复**：mixer 改成匹配真实编号的"180° 轮换"版 + `motor_direction_inverted=OFF` + `align_board_roll=1800`（倒装仅靠它补传感器朝向）。**现能起飞、不再自旋**。排查法见 §5.5；基线 dump：`drone/firmware/INAV_10.0.0_cli_20261010_dirfix.txt`。
+- ⚠️ **2026-10-14 飞控改回正装 → 撤销倒装补偿**：飞控**不再倒置**（正装），故 `align_board_roll` **1802→0**、mixer 由"180°轮换版"**恢复标准 QuadX**（`mmix0..3 = REAR_R/FRONT_R/REAR_L/FRONT_L`），已 `save`。**电机转向另有变动（由用户处理：ESC/物理）**；`motor_direction_inverted` 当时为 `ON`（待与电机方向一起定）。**务必先按 §5.5 拔桨复验三轴方向再飞**（不可跳）。回退值：`align_board_roll=1800` + 180°轮换版 mixer（见 dirfix dump）。
+- ✅ **上位机操控下位机（2026-10-11, 实验18）**：上位机 `takeover`（HSV 绿目标→roll/pitch→`MSP_SET_RAW_RC`）经 `MSP RC Override` 接管。**纠正 `msp_override_channels` 位序坑**（见 §6）→ 改 `7` 并 `save`（`get = 7` 已确认）。**台架验证通过**：接管生效（上位机用 `MSP_RC` 回读我方发送值吻合）、**油门未被覆盖**（mask=7）、**混控 Δ 与实测 `mmix` 一致**、符号自洽。实测：`mmix`=M1:+roll+pitch / M2:+roll-pitch / M3:-roll+pitch / M4:-roll-pitch；`align_board_roll=1800`、`motor_direction_inverted=OFF`、`min_check=1100`（油门需 >1100 才出混控）、AIRMODE 已启用。真机待标定 kp/符号（另有开放问题：水平误差 roll vs yaw，见上位机实验18）。
+- ✅ **接管三轴+范式/定点/定高选择（2026-10-12, 实验20）**：上位机 `paradigm` 读 `MSP_RC` 判 `ovr=(ch6>1300)||(ch8>1300)`，`ch6>1300`→范式B、`ch7`→定点/定高；**aux 已按上表改并 `save`**（`aux 0/1/2/3` 已核）。上位机 `mon`/`dry` 已验证（开关读值/模式判定/视觉符号）。**光流 MTF-02P**：`OPFLOW/RANGEFINDER=OK`，上位机经 MSP v2 读，`q≈40–60`（质量一般）。**下一步**：台架验 B追踪/定点/阻尼。
+
+### 5.2 ✅ EzTune 关闭 + INAV 默认 PID（Plan A）
+- **背景**：INAV 的 **EzTune** 特性在开启时会**覆盖** `mc_p/i/d`（每次启动重算）；此前 `ez_enabled=ON`（`ez_response≈92`），导致 PID 不受手动配置控制。
+- **已应用并持久化**：`ez_enabled=OFF`，恢复 INAV 默认 PID：
+  - `mc_p_pitch/roll=40/40`、`mc_i=30/30`、`mc_d=23/23`、`mc_p_yaw=85`、`mc_i_yaw=45`、`mc_d_yaw=0`
+  - `gyro_main_lpf_hz=60`、`dterm_lpf_hz=110`、`tpa_rate=0`、`setpoint_kalman_q=100`
+
+### 5.3 ⏳ 已知问题（**当前卡点**）
+1. **ANGLE 模式振荡加重**：Plan A 之后，ANGLE 自稳模式振荡更明显（此前用户在 ACRO 模式）。需要**黑匣子分析 + 降低 P**。
+2. ~~**CoG 偏左 → 起飞左翻**~~ → **已澄清（2026-10-10）**：所谓"左翻/自旋"实为**电机编号错位**（见 §5.1/§5.5），**不是 CoG、也不是 PID**；修复后能飞。CoG 仍偏左值得物理核对，但**不再是卡点**。
+3. **ANGLE 自稳/PID（有电池后再调）**：能飞，但需在 ANGLE 短悬停看**是否振荡/慢漂**再决定是否降 P/调滤波。
+   - 本机已具备**自写 INAV blackbox v2 解码器**（直接读 `~/Downloads/blackbox_log_*.TXT`，出 `roll/pitch/yaw`、`gyroADC`、`motor`）：无需 `blackbox_decode`。
+   - 已分析：`blackbox_log_2026-10-10_152838/160315/162041/164110.TXT` → 旧配置下是**方向类错误（翻/自旋）**，**并非 PID 振荡**；也印证"先修方向、再谈 PID"。
+   - 待办：短悬停取新日志 → 看 `gyroADC/axisP/axisD/motor` 的振荡频率/幅度 → 给 P/D/滤波建议。
+4. **MTF-02P 光流/测距（已在线）**：FC `status` 显示 `OPFLOW/RANGEFINDER=OK`；上位机经 **MSP v2** 读（`MSP2_INAV_OPTICAL_FLOW`/`MSP_SONAR_ALTITUDE`），实测 `q≈40–60`（**质量一般**，疑地面纹理/光照不足）。**规格**：光流**最小工作距离 8cm**、环境光 **>60Lux**、视场 42°、1m 处最大测速 7m/s、50Hz；测距 **0.02–6m（精度 2cm）**。→ 飞行高度须 **≥8cm**；质量差就换纹理地面/亮光，并标定 `opflow_scale`(内置 `MSP2_INAV_OPFLOW_CALIBRATION` 0x2032/手转30s)、`align_opflow`。手册：https://micoair.cn/zh/docs/sensors/sensors/mtf-02-02p-sensors
+   - 手册：https://micoair.cn/zh/docs/sensors/sensors/mtf-02-02p-sensors
+
+### 5.4 待办阶梯
+0. ~~方向类问题~~ → ✅ **已完成（2026-10-10）**。**无电池期间优先做"上位机侧"**（MSP 链路台架联调 + 视觉），飞行项等电池。
+1. （有电池后）拔桨→绑绳→短悬停：确认自稳、**无明显自旋/慢漂**。
+2. 取 ANGLE 黑匣子 → 解析 → 视振荡决定是否**降 P/调滤波**（小四轴 + 本板关了动态滤波，PID 保守）。
+3. **拔桨**联调：MSP 收发、ch8 拨杆切换、failsafe。
+4. 物理核对 CoG（仍偏左则配重）。
+5. **MTF-02P 标定**（`opflow_scale`、`align_opflow`）→ POSHOLD/ALTHOLD。
+
+### 5.5 ✅ 方向类问题排查法（编号 / 朝向 / 混控 / yaw 符号）
+> 教训：**"离地即翻/自旋/乱飘" 大概率是方向类问题，不是 PID**。调 PID 前先把"三轴方向"验对。
+
+**概念分工（务必别混用）**
+- `align_board_roll/pitch/yaw`：只补**传感器朝向**（飞控倒装/旋转 → 改这里）。
+- `mmix`（电机混控）：决定"逻辑 roll/pitch/yaw → 哪个**输出**"。**旋转飞控不影响它**；只有**电机接线/编号错位**才改它。
+- `motor_direction_inverted`：**只翻 yaw 符号**（`mixer.c:241` 置 `motorYawMultiplier=-1`），不动 roll/pitch。
+
+**本次事故**：飞控倒装(roll 180°) + 电机编号错位。曾用"镜像 mixer"去补 → roll/pitch 反 → **翻**；换回又因 `motor_direction_inverted` 错 → **yaw 自旋**。正解 = mixer 换成匹配真实编号的**180° 轮换版** + `motor_direction_inverted=OFF`。
+
+**改硬件后的"5 分钟方向自检"（拔桨！）**
+1. **板朝向**：水平放 → `attitude` roll/pitch≈0；抬机头→同向；抬右侧→同向。（不对 → 改 `align_board_*`）
+2. **电机编号/转向**（Configurator `Motors` 页）：M1–M4 对应的**物理角位/旋向**与图示一致。
+3. **闭环方向**（ANGLE、低-中油门、拔桨）：
+   - 压机头下 → **前桨加速**；压哪侧下 → **该侧电机加速**；拧偏航 → **反向抵抗**。
+   - 哪个轴帮倒忙 → 对应改 `align_board`/`mmix`/`motor_direction_inverted`，**一次只改一处**。
+4. 通过再上桨，**绑绳 → 短飞**。
+
+**工具**：① 自写 INAV blackbox v2 解码器 `tools/blackbox_decode.py`（读 `~/Downloads/blackbox_log_*.TXT`，出姿态/舵面/电机 + 频谱）；② 台架实时读 `tools/msp_live.py`（i5，读 `ATTITUDE/RAW_IMU/MOTOR`）/ `tools/telem_mon.c`（板上只读遥测）。详见 `../../tools/README.md`。
+
+### 5.6 定高/定点（固件 Z 分支）计划 — 2026-10-14 定稿 / 2026-10-15 修订
+
+**目标**：无气压计/无 GPS 时，用 MTF-02P **测距**提供高度参考，使 INAV 的 `ALTHOLD` 可用；**定高优先，定点（POSHOLD）条件重开**。定高定点全部在固件完成，上位机定高冻结（详见根 `../../AGENTS.md` §3.5）。
+
+**为什么先只做定高**：
+- **ALTHOLD 不在 `isUsingNAVModes` 列表**（`fc/rc_modes.c:305`），**不触发 GPS-home 解锁拦截**。
+- POSHOLD/RTH/WP 等会触发：解锁要求 `navigationPositionEstimateIsHealthy()`（含 `STATE(GPS_FIX_HOME)`），无 GPS 时返回 `NAV_ARMING_BLOCKER_MISSING_GPS_FIX` **拒绝解锁**（`navigation/navigation.c:6376,6392`）。
+- POSHOLD 还要求 `estVelStatus == EST_TRUSTED`（即 `eph < inav_max_eph_epv`，默认 1000cm），而 `eph` 仅在 **XY 传感器（光流）更新超时**时按 100/s 增长（`navigation_pos_estimator.c:768`）→ **定点稳定性直接取决于光流健康**。
+
+**阶段 0：光流/地面测试 — ✅ 已完成（2026-10-15，只读 `paradigm mon`）**
+- **结论**：光照度不是主因，**表面纹理主导**。光滑地面 `q≈20–24`（38/50/70cm 均如此，**低于门限 35 → 光流永不启用**）；有纹理面（鼠标垫/纹理垫）`q≈37–53`（29–61cm，**≥35 → 可启用**）。同架同静止只换面：21 → 39。
+- 强光直射反而更差（`q≈20`，疑高光过曝）；`q` 随运行时间缓慢上升（上电后稍等数秒更稳）。
+- 判定口径（源码）：`q` 为 0–100 标度；`sensors/opflow.c` `SQUAL_HIGH=35`（进入）/`SQUAL_LOW=10`（退出，滞回）。
+- 运动测试：手移主要由 **fY** 轴拾取（86→347），输出量化步进≈43，`opflow_scale` 未标定。
+- **操作性结论**：测试/飞行区铺**纹理地垫（鼠标垫即可）+ 高度 0.3–0.6m + 上电等数秒** → POSHOLD 的“光流健康”前提**可满足**（仍受无 GPS 解锁拦截限制）。
+- **门限判定**：✅ 达标 → **POSHOLD 可（在解决解锁拦截后）重开**。
+
+**接管与油门**
+- 一期：`mask=7`，飞行员扶油门中位试定高。
+- 二期：`mask=15`，上位机发中性 1500（**解锁/上锁时仍须发低位**，否则解锁条件不满足）。
+- `althold_throttle_type`：**先 `STICK`**（进入时油门值即“保持点”，对固定输入最可控）。
+
+**改动点（Z 分支）**
+- `navigation/navigation_pos_estimator.c` 的 `estimationCalculateCorrection_Z`：气压计与 GPS 均无效、测距有效时，用 `surface.alt` 修正 `est.pos.z`，权重复用 `w_z_surface_p/v`；同步更新 epv，使 `EST_Z_VALID` 可收敛/失效。
+- 解锁时记录地面零点；测距超时/可靠度低/超 `max_surface_altitude` 时 Z 失效并回落；不动气压计/GPS 分支。
+- **先验符号/坐标系**（`DEBUG_ALTITUDE`）——WP1 第一件事。
+
+**失效与安全**
+- `failsafe_procedure = LAND`（慢降），**不返航**；**“失联悬停”不采用**。
+- `ch5`=锁桨（唯一人工急停）；`ch8`=接管（高区间启用 `OVERRIDE+ANGLE+ALTHOLD`；POSHOLD 视阶段 0 结论）。
+- **看门狗（无人飞行前必做）**：上位机“控制循环心跳+监督线程”，超时 → 停发 RC（借 FC failsafe 落地）。
+
+**剩余只读核实**：紧急降落是否依赖高度估计。
+
+**✅ 实机只读核实（2026-10-15，FC 经 USB VCP，未改任何配置）**：
+- `failsafe_procedure = LAND`（确认；配置稿已同步）
+- `msp_override_channels = 7`；`nav_extra_arming_safety = ALLOW_BYPASS`；`nav_mc_althold_throttle = STICK`
+- `inav_max_eph_epv = 1000cm`；`inav_max_surface_altitude = 200cm`（**限制测距 Z 分支可用高度 0–2m，必要时上调，上限 1000**）
+- `inav_w_z_surface_p/v = 3.5 / 6.1`；`inav_w_xy_flow_v = 2.0`；`nav_mc_hover_thr = 1300`
+- ⚠️ **`inav_reset_altitude = FIRST_ARM` 不会直接清零 `est.pos.z`**（它只重置气压计/GPS 参考）。地面零点在**Z 分支内实现**（offset 解锁前跟随、解锁后冻结），其**时机**由该设置决定（需要每次解锁重置则改 `EACH_ARM`）。
+- **`inav_allow_dead_reckoning = OFF`** → **POSHOLD 的光流 XY 位置修正需要它 = ON**（`navigation_pos_estimator_flow.c` 仅 GPS 或 dead-reckoning 才做位置修正）
+- 传感器：`RANGEFINDER=OK, OPFLOW=OK`；`BARO/GPS/MAG=NONE`
+- 其他：PID 环 ~1988Hz（cycle 503us）、System load 14、Heap 余量 1668B、Stack 顶 0x10008000（= CCM 实际到 32K 的旁证）、配置占用 10486/16384
+
+**里程碑**：M1 拔桨比对 `est.pos.z`（0.2/0.5/1.0m）→ M2 绑绳 ALTHOLD 悬停 → M3 遮挡验失效 → M4 拔串口验 LAND → M5 短飞；定点 M6 视阶段 0 结论。
+
+### 5.7 Z 分支实现状态 — 2026-10-15 实现 / 10-16 刷写 / 10-17 台架首验通过
+
+**工作树**：新建 **`drone/inav-g4alt/`**（从 `inav-g4dbg/` 复制、去除 build；**原 `inav/`、`inav-g4dbg/` 保持未改动**，可随时回退）。注意：rsync 排除 `build` 时须用锚定 `/build`，否则会误删 `src/main/build/`（踩过）。
+
+**改动（3 文件）**
+- `navigation_pos_estimator_private.h`：`navPositionEstimatorSURFACE_t` 加 `updateDt`；新增 `INAV_SURFACE_DEFAULT_EPV 50.0f`。
+- `navigation_pos_estimator_agl.c`：`updatePositionEstimator_SurfaceTopic` 记录 `surface.updateDt`。
+- `navigation_pos_estimator.c`：`estimationCalculateCorrection_Z` 新增“测距 Z 分支”（条件：气压计与 GPS-Z 均无效 + `EST_SURFACE_VALID` + reliability≥0.33）；`maxUpdateDt`/清零纳入 `surface.updateDt`。
+  - 零点：`shouldResetReferenceAltitude()` 为真时用**滤波均值**更新 offset，解锁后冻结；Z 无效时直接吸附初始化（`pos.z = 测距-offset`、`vel.z=0`、`epv=INAV_SURFACE_DEFAULT_EPV`）。
+  - 修正：P/V 复用 `w_z_surface_p/v`，按 `bellCurve`（50cm 窗）+ reliability 加权；`epv` 用测距残差更新。增益结构与 INAV 自带 AGL 估计同构（每秒等效增益一致）。
+  - 未动气压计/GPS 分支；无气压计时该分支成为唯一 Z 源。
+
+**构建**（i5，arm-none-eabi-gcc 16.2.0）：`cmake -B build -G Ninja -DCOMPILER_VERSION_CHECK=OFF` + `ninja -C build BETAFPVG473`
+- 产物：`inav-g4alt/build/bin/BETAFPVG473.elf`、`inav-g4alt/build/inav_10.0.0_BETAFPVG473.hex`（刷写地址 `0x08000000`）
+- 体积：`FLASH1 458410B/480KiB = 93.26%`（+296B）、`RAM 88756B`（+12B）、`CCM 11872B`
+
+**⚠️ 行为变化（回归排查结论）**
+- `estAglStatus`: `EST_NONE`→`EST_USABLE`（Z 由无效变有效所致）。消费者多在 `== EST_TRUSTED` 门控 → 本机不触发；`getLandAltitude()` 仅固定翼使用 → 无影响。
+- 多旋翼降落检测：`safetyTime` 5000→1000ms（因 Z 有效）、`verticalSpeedSettled` 改用真实垂速 → **台架重点观察**（涉及 LAND 失效与自动上锁）。
+- `MSP_SONAR_ALTITUDE` 返回**测距原始值**（非 `agl.pos.z`）→ **上位机 `alt=` 不受影响**（已核实）。
+- 待改进（P2，落地阶段再议）：`aglQual` 保持 LOW → 触地检测少一层“距地 <5cm”确认。
+
+**✅ M1 台架首验通过（2026-10-17，拔桨解锁状态）**
+- 条件：ch5=2000 解锁（`T≈1006~1017` = 油门到底）、ch8=1000、ch7=1000；上位机 `paradigm mon`（已加 `MSP_ALTITUDE(109)` 显示 `z/vz`）。
+- 结果：**z 全程跟随 alt（误差 0~3cm），3~83cm 均成立；静止时 `vz` 收敛到 0**。
+- 机制验证：**未解锁前 z 被钉在 0**（零点持续跟随，`shouldResetReferenceAltitude()`）；**解锁瞬间零点冻结后 z 正常跟踪** —— 与实现预期完全一致（这也是"必须先解锁才能测 z"的原因）。
+- 已知动态特性：快速手动升降时 z 滞后/微超调（1–2s 收敛、不发散）——有限权重修正的正常二阶响应。
+- 已知盲区：**在平地外做水平平移**（如从桌边平移到地面）测距会阶跃 → z 出现"假高度"（`bellCurve` 50cm 窗降权 0.1× 减慢收敛、不能消除）；平地飞行无影响。
+- 待做：**M3 遮挡验失效**（`EST_SURFACE_VALID` 掉后 z 漂移行为）；M2 绑绳/飞行验证。
+
+**FC 配置（方案 A，2026-10-16 写入并 save）**：`aux 4 3 2 1300 2100`（ch7≥1300 → NAV ALTHOLD；现阶段"中位即定高"）；后续拆分为 `[1300,1700)`=定高 / `[1700,2100)`=定点（需先解 POSHOLD 三门）。
+
+**✅ 首次定高试飞（2026-10-17，黑匣子 `~/Downloads/第一次定高.TXT`，5 段）**
+- **段1（12.5s，纯 ANGLE）**：起飞→悬停≈12s，姿态 ±2°、电机 ~1600，正常收尾；**电机长期不对称**（m0 恒低 ~50，疑 CoG/校准）→ 与"水平漂"相关。
+- **段4（15.5s，ANGLE+NAV_ALTHOLD）**：`flightModeFlags=10`（bit1=ANGLE｜bit3=NAV_ALTHOLD）→ **定高真实挂上并飞行**；`navFlags=1`（bit0=`estAltStatus==EST_TRUSTED`）→ **Z 分支在飞行中给出可信高度**；测距爬到 ~1.66m；**结尾 ~14.4s 翻滚坠机**（roll→70°、m1 饱和 2000、油门命令顶满但高度反降）→ **已归因：`nav_mc_hover_thr` 未标定（见本节末"✓ 坠机归因闭环"块）**。
+- **黑匣子字段口径（2026-10-17 晚修正）**：`mspOverrideFlags`（慢帧，`blackbox.c:1545`）**bit1=BOXMSPRCOVERRIDE 开关激活、bit0=接管数据流超时(failsafe)**（本地静态，**不是物理 RX 失控**）；`navState` = **`navPersistentId`**（`navigation.c:6568`）：**0=UNDEFINED / 1=IDLE / 2=ALTHOLD_INIT / 3=ALTHOLD_IN_PROGRESS**（**旧口径"1=NAV_CTL_ALT、3=ALT|POS"作废**）；`navFlags`：bit0=alt TRUSTED / bit1=AGL / bit2=pos / bit3=terrain-follow / bit5=heading / **bit6=isAdjustingPosition、bit7=isAdjustingAltitude、bit8=isAdjustingHeading（杆动时置位，`navigation.c:5995-5997`）**；`flightModeFlags`（=boxId 位）：bit0=ARM、bit1=ANGLE、bit3=NAV_ALTHOLD。
+- **待办（10-17 晚更新）**：2.5m 悬停 30s 验证（验收 ≤20cm）+ 1→3m 慢爬穿越 2m 边界；A1 地面项（水平/accel 核对、CoG、vbat 对表）；灵敏度暂缓；水平漂：定高≠定点（XY 无回路），先靠 A1 校准减小定向分量，真正锁定留 POSHOLD/上位机方案。
+
+**✅ 坠机归因闭环 + 修复 + 复测（2026-10-17 晚）**
+- **归因（定论）**：`nav_mc_hover_thr=1300` 未标定（实测满电悬停 ≈1585-1610）→ 空中拨入定高瞬间输出基准被置为 1300（`resetMulticopterAltitudeController()` 写死 hover_throttle）→ −300us 推力缺口 → 下沉 ~1.4m/s；叠加低电量 sag（3.39→3.04V）与漂移进软网收尾。Z 分支/高度估计全程无误。
+- **修复①**：`set nav_mc_hover_thr = 1585`（满电 ANGLE 悬停 10s，黑匣子实测 `rcCommand[3]`≈1584）→ save 持久化（已复读）。
+- **修复②**：`set inav_max_surface_altitude = 200 → 400`：原默认把 **>200cm 的测距样本一律判无效**（`navigation_pos_estimator_agl.c:57`）→ reliability 按 ~0.48s 衰减 → <0.33 时 Z 分支停止修正（`navigation_pos_estimator.c:689-690`）→ **2m 以上定高失反馈（"2m 软墙"）**。400cm 覆盖 2.5m 需求+余量。
+- **复测（黑匣子 `blackbox_logs/blackbox_log_2026-10-17_161306.TXT` seg4；seg2/seg3 为无定高杂段）**：拨入瞬间 `rcCommand[3]` 1630→**1580≈hover_thr**（旧行为→1300）；无下沉，+15cm 过冲（切入时仍在爬升的动量）、~1.0-1.2s 回稳，随后 37.5±3.0cm 稳定；**飞越凳子/箱子上空**时测距 z 阶跃（如 47→2cm）→ 油门/高度摆动（"地形跟随"固有盲区实飞实证；比赛巡航需留意：飞行剖面避开/高于障碍）。
+- **失效链路核实（A5，源码）**：① 上位机流超时（200ms+`failsafe_delay`0.5s≈0.7s）→ `rx.c:513` 门控关 → **静默回落物理遥控**（`msp_override.c`，设计即"RC 优先/硬件兜底"），**不触发主 failsafe**；重连后 0.2-0.7s 静默重新接管。② 物理 RC 丢失 → LAND=`activateForcedEmergLanding()`（`navigation.c:6945`）→ NAV 紧急降落（**依赖高度估计**；≤400cm 由 Z 分支支撑）→ 落地检测自动上锁；遥控恢复+打杆→中止。③ **"看门狗停发 RC 借 failsafe 落地"前提不成立**（停发只会回落物理遥控）→ phase 4 重新设计。
+- **✅ 2m+ 验证（2026-10-17 晚2：`blackbox_logs/2M定高.TXT`，37.3s）**：8.42s 于 **2.2m** 拨入（切入时仍在爬升 ~0.65m/s）→ **无下沉**；+36cm 过冲、~2.3s 回稳，随后杆静止段高度波动 **±3cm**（10.7–11.2s）；中途爬至 **3.6m**：测距 200→360cm 连续、`navFlags` bit0 不掉 → **"2m 软墙"修复验证通过**。pitch 大角度（-9°/ -19°）均与打杆一一对应（机动，非失控）；稳态 ~4° 滚转偏置仍在（A1 待做）。**30s 静止悬停未做正式测试**（整场在杆上操作）→ 用户判定测试充分（10-17 收尾）→ 本项**免测关闭**；**定高部分 = 达标**。
+
+**📋 定点（POSHOLD）三道门核查（2026-10-17 晚，源码确证；目标：ch7 [1700,2100)=定点）**
+- **广告门（非阻塞）**：`updateActivatedModes()`（`rc_modes.c:253`）只看 aux 配置，与 `initActiveBoxIds` 的可用性过滤无关（同 ALTHOLD 先例）→ CLI 直接 `aux 5 11 2 1700 2100` 即生效（Configurator 列表可能不显示）。⚠️ **第二列 = 永久 ID（permanentId）不是 boxId**：POSHOLD=**11**（boxId 9 会静默清空槽位，见 §6-28）。
+- **解锁门**：配置 POSHOLD 后 `isUsingNAVModes`（`rc_modes.c:305`）生效 → 解锁要求 `navigationPositionEstimateIsHealthy()`（estPos≥USABLE && estAlt≥USABLE && `GPS_FIX_HOME`）。两条过法：① **YAW_HI 手势**（`nav_extra_arming_safety=ALLOW_BYPASS` 默认）：解锁时右偏航打满 + ch5 → 放行并置 `NAV_EXTRA_ARMING_SAFETY_BYPASSED`（`navigation.c:6381-6400`，同电周期内后续 re-arm 免手势）；② **手持建 home**：未解锁时 `updateHomePosition()` 在 estPos≥USABLE 时自动建 home（`navigation.c:4823`）→ 拿在纹理垫上方 ≥10cm 停数秒即可。
+- **估计门**：**必须 `set inav_allow_dead_reckoning = ON`**（光流位置修正的唯一开关：`navigation_pos_estimator_flow.c:108`；现 OFF）；光流健康（纹理垫/q≥35/0.3-0.6m）保证 `estVelStatus==TRUSTED`；`opflow_scale`（现 1.133）/`align_opflow` 待标定。
+- **模式优先级**：`navigation.c:6273` **POSHOLD 优先于 ALTHOLD**；**推荐重叠区间**（`aux 4 3 2 1300 2100` 不变 + `aux 5 11 2 1700 2100`，**10-17 深夜已写入并 save**）→ 光流不健康时自动落回 ALTHOLD 兜底（严格拆分存在"高位无兜底 → 掉回 IDLE"风险，验证稳定后再拆）。
+- **激活条件**（`navigation.c:6024`）：`canActivatePosHold = estPos≥USABLE && estVel==TRUSTED && estHeading≥USABLE`；**不需要 GPS_FIX_HOME**（那只用于解锁检查）。
+
+**✅ 光流符号修复 + align 标定（2026-10-17 深夜）**
+- **bug**：`fc_msp.c:778-781` 原用 `sbufWriteU16(dst, RADIANS_TO_DEGREES(...))`——float→uint16 **负值饱和为 0** → MSP2 光流遥测"永不负值"（全向动作只见单符号）。输入链路（`msp_protocol_v2_sensor_msg.h` int32 有符号）与工具端（`flow_damp.cpp` int16 解析）本来都对。
+- **修复**：4 行改 `(int16_t)lrintf(RADIANS_TO_DEGREES(...))` → 重编刷 hex（**新版本 `Oct 17 2026 / 19:02:04 (7e2d65a5)`**、FLASH1 458394B；回退 `firmware/BETAFPVG473-z-branch-e112ce42/`）。刷后验证：版本/传感器/配置四项全过；手持测试负值正常出现。
+- **四组标定（磁带点位+聊天书签+快移慢回）**：CW0FLIP 下 **右→+Y / 左→−Y / 前→−X / 后→+X**（两两反号自洽）。
+- **结论**：目标约定 右→+X、前→−Y（`navigation_pos_estimator_flow.c:86-87`）→ 8 矩阵枚举唯一解 **`align_opflow = CW90`**（已 set+save+复读）。改后复测命中：右→**+X +739**、前→**−Y −1088** ✓。
+- **`opflow_scale` 现值 1.133**（默认 10.5）：**手持标定不可行**——传感器两头受限（慢 <~50°/s 死区截断：4×1m 慢滑行积分只记到 19%；快 >~400°/s 规格上限饱和虚高：快推积分 2–2.6× 为伪值）→ **维持 1.133，改"飞行中标定"**（低空已知距离平移对账）；详见 §6-27。
+- **P1 已写入（10-17 深夜，已复读）**：`inav_allow_dead_reckoning = ON` + `aux 5 11 2 1700 2100`（ch7≥1700=POSHOLD，永久ID=11）→ **下一步：台架（拔桨）验模式进出**（解锁用 YAW_HI 手势 + ch7 高位 → `navState` 6/7）→ 真机低空定点 + scale 飞行标定。
+
+**未做**：方案 B（给 `navReadyAltControl` 补测距分支，让 ALTHOLD 进 Configurator 列表）；`inav_reset_altitude` 改 `EACH_ARM`（可选）。
+
+### 5.8 2026-10-18：定点试飞失控 + 电池档案坑 + 固件疑云 + 重刷（重要交接）
+
+**当日结论（全部在案）**
+1. **台架（黑匣子为准）**：POSHOLD 进出正常——`navState` 6/7 ↔ 3 ↔ 1 与 ch7 拨杆逐点吻合；功能路径 OK。
+2. **`mon` 的 `navS` 不可信（未解异常）**：`MSP_NAV_STATUS(106)` 实测**恒回 18 个零字节**；构建源码/ELF 里该分支应为 **9 字节**（5×u8 + 2×u16）。黑匣子与源码一致、与实测相反 → **定点判据点只用黑匣子**（`navState` / `navFlags` / `flightModeFlags`）。
+3. **两次真机定点试飞均失控**（数据在 `blackbox_logs/blackbox_log_2026-10-18_105144.TXT`）：拨入定点后 **1–2.5s 内位置环自激振荡**（`rcCommand[0/1]` 先正负交替、随后指数发散至 ±400 饱和）→ 第 1 次右滚坠地、第 2 次翻滚坠机。**根因未定位**（候选：位置环增益/相位、速度估计噪声、固件疑云）。**定位前禁止再飞定点。**
+4. **电池档案坑（已修）**：`nav_mc_hover_thr` 是**电池档案（battery_profile）级**参数——`1585` 只写在档案 1；飞行落在档案 2/3（默认 **1300**）→ 拨入定高瞬间油门基准被置 1300 → 下沉 ~1m。**已三档统一 =1585、活动档设回 1（save + 复读）**。教训：档案级参数要么三档全写、要么别切档。
+5. **ch7 连拨陷阱（已查明）**：`checkManualEmergencyLandingControl` —— **4s 内 5 次进入 POSHOLD 区间 = 翻转"手动紧急降落"开关**；该标志优先于一切导航模式（选择器直接返回 `SWITCH_TO_EMERGENCY_LANDING`）→ 台架上"反复回退空闲"，看起来"定点挂不上"。**上锁（disarm）即复位**。纪律：**ch7 一律一次性拨到位，严禁连拨**（空中连拨 = 意外紧急降落）。
+6. **固件身份核验（DFU 读回，只读）**：读回 512KB 与 `inav-g4alt/build/inav_10.0.0_BETAFPVG473.hex` 逐字节比对 = 除配置区（0x4000–0x8000）与未编程区（hex 缺口 vs FF）外**完全一致**（"半刷"排除）；106 异常因此**仍未解释**。**用户随后手动重刷该 hex**（.hex 保配置）→ **重刷后必须复基线**（见下）。
+7. **黑匣子 flash 停写**：`MSP_DATAFLASH_SUMMARY(70)` 的 `used=0` 且 15s 不增长（此前多次"下载不到新数据"即此故；Configurator 的 Blackbox 页有 **Erase** 按钮，慎点）——重刷后复查是否恢复。
+8. **地面推机测试（手推、q≥35）**：`fX/fY`（光流）与 `ePx/ePy/eVx/eVy`（估计器）**符号自洽**（无反号证据）→ **不支持"盲翻 align_opflow"**；绝对方向因"快摆饱和（>400°/s）"未定案，需"标准慢推"（每次 ~20cm、1–2s、停 3s）复测。
+9. **当天新增工具**：USB 直读 MSP（`/dev/ttyACM0`，权限 666；docker 或主机 python；**注意 FC 重启后 VCP 常需物理重插**）；`MSP_DATAFLASH_SUMMARY` 读黑匣子占用；`dfu-util -U` 读回固件（`tpuc_mlir:dfu` 镜像）；命令见 `commands.md` §11。exp20 `mon` 已扩展 `navS/navM/navN/arm/ePx/ePy/eVx/eVy/电机/aux 表`（源码改动未提交 git）。
+
+**重刷后复基线清单（按序；每步先报告+等确认）**
+1. `version` 复查（应仍为 `Oct 17 2026 / 19:02:04 (7e2d65a5)`）；
+2. **USB 直读 121（NAV_STATUS）：应为 9 字节**；**106（RAW_GPS）恒为 18 零字节属正常**（2026-10-19 结案：工具 `msp.h` 曾把 NAV_STATUS 写成 106）；
+3. `DATAFLASH_SUMMARY`：`used` 应开始增长（黑匣子写入恢复）；
+4. 配置复查：`aux` 6 条（含 `aux 5 11 2 1700 2100`）/ 三档 `nav_mc_hover_thr=1585` / `align_opflow=CW90` / `inav_allow_dead_reckoning=ON` / `inav_max_surface_altitude=400`；
+5. 全过后 → **台架闭环方向测试**（拔桨、挂定点、手推向右/前，黑匣子看**电机响应方向**：正确=反向抵抗；"帮倒忙"=实锤反号再议改轴；方向对但自激=调增益）→ 通过才允许**低空定点试飞**（0.3–0.6m、软垫、随时可切回定高/上锁）。
+
+### 5.9 2026-10-19：定点根因排查（106 结案 / 解锁结案 / 遥测大补 / 符号类排除）
+
+> ⚠️ **2026-10-20 后续更正**：本节的 `opflow_scale=1.133` 已证实**严重偏小**（实际约 4.4–4.7）；正确的 scale 校准是 **roll/pitch tilt**，不是 yaw；见 §5.10 / §6-39。P 项/坐标系检验抓不到 scale/板对齐这类共模/下游误差。
+
+**一句话**：符号与坐标系类假设已排除；剩余主嫌疑 = **动力学（`opflow_scale` 未飞行标定、位置/速度环增益与相位延迟）**。
+
+1. **106 结案**：INAV 10 中 `MSP_RAW_GPS=106`（1+1+4+4+2+2+2+2=**18B**，无 GPS → 18 零字节，合法）、`MSP_NAV_STATUS=121`（5×u8+2×u16=**9B**）。exp20 `msp.h` 的 `MSP_NAV_STATUS 106` 是错的（待改 121）。DFU 读回与 hex 一致，"半刷"排除是对的。
+2. **"定点挂不上"结案 = 解锁被拦**（非配置丢失/非 nav bug）：油门低端读数贴 `mincheck=1100` 边缘（986–1015 正常 / 1064–1090 边缘）、重启后需重新 YAW_HI 手势（右偏航打满 + ch5）。用 MSP 0x2000 的 `armingFlags`（u32 @payload[9]）或 113 的 ARM 位确认：bit2=ARMED、bit19=THROTTLE、bit11=NAVIGATION_UNSAFE、bit29=DSHOT_BEEPER。
+3. **黑匣子遥测字段发现（无需刷固件）**：firmware 已内置 `NAV_POS`/`NAV_ACC` 字段组，FC 配置默认关闭。CLI：`blackbox NAV_POS` / `blackbox NAV_ACC`（关用 `blackbox -NAV_POS`）+ `save`。开启后 I 帧含 `navEPH/navEPV/navPos/navVel/navTgtVel/navTgtPos/navTgtHdg/navSurf/navAcc`（unit: cm / cm/s；`navVel`=估计速度、`navTgtVel`=位置环输出的目标速度、`navAcc`=IMU 加速度 NEU）。
+4. **P 项正确**：`navTgtVel·(navTgtPos−navPos)` 1058 采样全正 → 位置误差→速度目标方向正确（P=0 反号排除）。
+5. **控制器坐标系/符号正确**（本次新方法）：按 `navigation_multicopter.c:817-825` 的**自身公式**反推意图加速度（用同一个 `attitude.values.yaw`），对照其自身输入误差 `(navTgtVel−navVel)`：172/208 同向、**后半段 104/104 同向** → 控制器数学自洽（无旋转/镜像 bug）。
+6. **光流方向（镜像）假设未获证据**：台架慢推/抖动/对齐扫描（CW0/CW180/CW270）均无法判读——被"死区(<50°/s)/饱和(>400°/s)/q<35→速度衰减到零"污染；flightC（4 m/s 大机动）同样饱和/失效。**没有可信反号证据，也没有干净定案**。
+7. **下一步**：安全 ANGLE "**2m 距离对账**"飞行（不碰定点）→ 看 `navPos` 位移 vs 真实 2m 判 `opflow_scale`（当前 1.133，默认 10.5）；≈2m=正常→调增益/相位（`nav_mc_vel_xy_p/i/d`、`inav_w_xy_flow_v`）；差很多→按比例改 scale 后复测。**（2026-10-20 更正：2m 直线飞行对用户场地/机型不现实；scale 用 roll/pitch tilt 校准，见 §5.10 / §6-39；P 项/坐标系检验抓不到 scale/板对齐这类共模/下游误差。）**
+
+---
+
+### 5.10 2026-10-20：定点自激根因 = 光流 scale 严重偏差；4° 假补偿；control profile 3
+
+**一句话**：`opflow_scale=1.133`（实际约 4.4–4.7）是 POSHOLD 快速自激/过补偿的主因；同时 `align_board_pitch=-42`（4.2° 假补偿）和活动 `control_profile=3` 造成持续前倾/手感怪；`mmix` 是标准 QuadX、前电机未坏。固定 4.0 后定点稳定（位置误差 12–57cm、`navEPH` 3–20），剩 **2–3cm/s 慢漂**（光流死区以下，属原理性限制，最终靠视觉/绝对参考）。详细复盘：`../../复盘_2026-10-20_光流校准严重偏差与定点排错.md`。
+
+**证据（日志在 `../../blackbox_logs/`）**
+- `..._定点测试_类似超调.TXT`：scale 1.133；POSHOLD 20.26–23.71s；`rcCommand` pitch ±388、姿态 ±25–30°；外环极限环/坠机。
+- `..._改了scale之后效果明显好了...TXT`：scale ~4.49/4.73；三段 hold 位置误差 18–57 / 10–47 / 15–117cm；`navEPH` 3–20；慢漂 2–3cm/s。
+- `..._scale.TXT`：scale 4.0；5s 段（29.95–34.05s）位置误差 12–35cm（均值 23.8），`navEPH` 2–8；慢漂 ~3cm/s；无振荡。
+- `..._11111.TXT`：I=20；第二段被 508us 打杆、目标跳动、vbat 2.91–3.19V 污染（误差 11→110cm、`rcCommand` −499、`navEPH` 30）→ **不能归因**；I 已回 15。
+- `..._失败的2m横向测试.TXT`：实际 `flags=523`（POSHOLD），不是开环，不能判 scale。
+- `..._严重怀疑前面两个电机摸鱼.TXT`：1.09s、油门 1014、四电机 1080，是 disarmed/手持尾段，无起飞段。
+
+**根因与排除**
+1. **`opflow_scale` 是分母**（`sensors/opflow.c:208`：`rate = raw × (1e6/dt) / scale`）：1.133 相对 4.5 约小 4× → 估计速度/位置约 4× 偏大 → 位置环反向补偿过量 → 自激/飞出去。
+2. **yaw 校准 5.19 无效**：`opflow.c:239-242` 累计的是 `bodyRate[X/Y]`（roll/pitch）+ flow；纯 yaw 不产生 X/Y。正确是 **roll/pitch 倾斜 30s**（±30–40°、60–90°/s、q≥35、0.3–0.6m、纹理垫、不平移；可来回倾斜，代码累计幅值）。tilt 实测 **4.4/4.49/4.73**；默认 10.5 不是目标，不要手设。
+3. **`align_board_pitch=-42`（-4.2°）是假补偿**：把传感器坐标系硬转 → 姿态基准倾斜 → 持续前倾/“往前补太多”；10-17 已知良好是 0，已改回 0。静态偏置应用 **A1 加速度计校准**，不是 `align_board`。
+4. **活动 `control_profile=3`**：默认 rates/expo/FF/TPA，非 10-17 的 profile 1（rc_expo 80/80、rates 70/70/60、mc_cd 88/80/90、Smith 1.447、TPA off）；已切回 1；`ez_enabled=OFF`。
+5. **`nav_mc_bank_angle` 35→20**：安全帽；日志姿态未到 20，保留。
+6. **排除**：`mmix` 被改（当前标准 QuadX，与 10-17 一致）、前电机弱/坏（`motor[]` 是命令不是推力；日志无起飞段）、P 项反号/控制器坐标系（10-19 已排除；但它们抓不到 scale/板对齐这类下游/共模误差）。
+
+**当前 FC 状态（2026-10-20 收尾）**
+- 固件 `INAV/BETAFPVG473 10.0.0 Oct 17 2026 / 19:02:04 (7e2d65a5)`（未重刷）。
+- `opflow_scale=4.000`；`align_opflow=CW90`；`align_board_roll/pitch=0`；`control_profile=1`；`battery_profile=1`；`mixer_profile=1`；`ez_enabled=OFF`；`nav_mc_bank_angle=20`。
+- 外环：`nav_mc_pos_xy_p=65`（2026-10-21 已回退）；`nav_mc_vel_xy_i=15`；`nav_mc_vel_xy_p=40`；`nav_mc_vel_xy_d=100`；`nav_mc_vel_xy_ff=40`；`inav_w_xy_flow_v=2.0`；`inav_w_xy_flow_p=1.0`。
+- **2026-10-21：P=75 试飞出现持续左漂/发散**（`blackbox_log_2026-10-21_一直往左偏且救不回来.TXT`：POSHOLD 6.36–9.31s、目标固定、无打杆；误差 30.7–85.4cm、`navEPH` 7→29；`rcCommand roll` 0→−140、`attitude roll` 0→−8.5°，但 `navVel y` −27→+20、`navTgtVel y` −57；yaw 3.8–4.5° 稳定；电机 m2 高/m3 低 ~200us）。**P=75 是唯一变更，P=65 基线只是 2–3cm/s 慢漂 → P=75 过强/放大左侧不对称；已回退 P=65。**
+- aux 6 条、blackbox 0x1FF3、hover_thr 三档 1585、surface 400、dead_reckoning ON、override 7、failsafe LAND 按 10-19 基线。
+
+**下次开工**
+1. 满电、0.3–0.6m、纹理垫、软区；稳定悬停到 `navVel≈0`；
+2. 不打杆、目标不动，POSHOLD 5s，bank 20；低速退出；记录位置误差/漂移/`navTgtVel/navVel`/`rcCommand/attitude`/`navEPH`/vbat；
+3. P=75 已于 10-21 证明**过强**（左漂/发散，误差 30.7–85.4cm、`navEPH` 7→29），**已回退 P=65，不要再把 P=75 当候选**；P=65 若仍持续左漂，查 CoG/左侧电机/桨/`align_opflow`（日志 m2 高、m3 低 ~200us）；2–3cm/s 慢漂接受，转视觉/绝对参考；
+4. 想确认 scale 就做 known-tilt（复盘附录 B），不要再用 yaw；2–3cm/s 慢漂接受，转视觉/绝对参考；
+5. 工具债：`msp.h` 106→121；A1 加速度计/水平校准仍建议做一次。
+
+**配置文件快照**：`drone/firmware/INAV_10.0.0_cli_20261020_scale40_p65_i15.txt`（上次飞行验证基线）、`..._p75_i15.txt`（当前，未试飞）。
+
+**2026-10-22 追加：仍无干净 POSHOLD 样本；定高右漂是真实横向加速度**
+- 三条近期日志：10-21“第二次高度摔”POSHOLD 仅 0.75s、入口 `navVel x≈+39cm/s`；10-22“一直在飘”`flightModeFlags=11`/`navState=3`，**只有 ALTHOLD，无 POSHOLD**；10-22“pitch=1”最后仅约 0.3s 无杆定高，随后打杆/姿态到 30°/电机饱和/坠落。
+- 10-22 定高无杆段（9.9–11.6、13.1–15.1、17.5–19.0s）：约 **0.3m/s² 右向加速度**，`attitude roll≈0`，m2 高/m1 低 **116–160us**，`navEPH` 8–15，目标固定；`navAcc x` 与 `navVel x` 同向增大 → 真实横向力，优先怀疑水平基准/CoG/电机桨，不是 PID。
+- 2026-10-23 因更新机械结构（安装角变化），CLI 读回：`align_board_roll=0`、`align_board_pitch=-5`（-0.5°；set+save+读回）。此前口头说改 0/1，但实际读回 0/0，说明当时的 1 未生效；历史实机曾 -10/0。具体机械改动待补记。
+- `I2C Errors=50` 之前没见过；位置传感器（光流/测距）走 MSP、IMU 走 SPI，暂不直接解释 XY 漂移；先看上电后是否继续增长。
+- 结论：**不要加 P**（P=75 已失败）；先做水平/CoG/电机检查 + 干净 ALTHOLD 无杆 10s×3；再做干净 POSHOLD 5s×3。2–3cm/s 慢漂在光流死区以下，目标应是“不持续加速、不发散、误差可接受”。详见 `../../AGENTS.md`。
+
+**2026-10-23 更新：定点暂停，转上下位机通信/视觉撞击**
+- 机械结构更新（安装角变化）→ `align_board_pitch=-5`（-0.5°）、`align_board_roll=0`，已 save+读回；具体机械改动待补记。
+- 纯光流定点仍有点飘，**暂停继续调**；下一阶段：FC 定高 + 上位机 MSP 三轴接管 + 视觉识别/接近/撞击。
+- **先统一模式语义**：当前 FC 的 ch7 中=定高、高=定点；旧 exp20 恰好相反（中=上位机定点、高=上位机定高），直接跑会两边抢控制。
+- 上位机看门狗未实现；FC failsafe 只认物理 RC 丢失，不认上位机假死。先台架/绑绳，飞手保持接管。
+
+**2026-11-03 更新：hover_thr 1615；旧板/旧相机报废；上位机 IP 变更**
+- `nav_mc_hover_thr` **1585→1615**（三档 battery_profile 全写 + 回档 1 + save + 逐档读回；依据 10-25 新机械定高日志 3.5V 段 `rcCommand[3]` 均值）。工具 `connection/set_hover_thr.sh` 自带 diff all 备份与读回。
+- 注意：**INAV CLI 的 `exit`/`save` 都会重启 FC、USB 节点消失**，脚本按“每会话一件事 + 等端口回来”设计；`set_hover_thr.sh` 可直接复用改其它电池档案级参数。
+- 旧上位机板烧毁、旧相机模组损坏；新板 `10.117.42.1` 验证相机可用（`warmup done: 10 frames` + RTSP 8554）。
+- 相机下倾 **12° 定稿**；攻击高度 = 目标 +10cm（目标1 取 1.40m、目标2 0.65m 或俯冲），末速 ≤0.7m/s。
+- 下一步：mask 将扩为 15（油门交上位机）→ 起飞/降落/返航进上位机状态机；任务时长改由电量决定。**解锁仍必须物理 ch5（INAV 强制 ARM 通道在 override 中为 OFF）**。
+
+---
+
+## 6. 关键坑与教训（血泪清单）
+
+1. **`MAX_MSP_PORT_COUNT=3`**：MSP 端口数超限 → 整个 serial 配置在启动时被重置。务必清空用不到的 UART1（`serial 0 0 ...`）。
+2. **UART1 仅 RX**（SBUS 用），无 TX，接不了双向外设。
+3. **UART1/ttyS1 与板载 Wi-Fi/BT(AIC8800) 共用引脚**（LicheeRV 侧），别用；上位机用 **UART0/ttyS0**。
+4. **UART0 console getty 占口**：板内 `/etc/inittab` 需注释掉才能自由使用 ttyS0。
+5. **EzTune 覆盖 `mc_*`**：调 PID 前先确认 `ez_enabled=OFF`，否则改了也没用。
+6. **目标板 flash 紧张（93%）**：动态滤波等被 `#undef`，滤波/调参策略要保守。
+7. **`inav-g4dbg/`、`inav/`、`drone.zip` 等均 gitignore**（不入库）；改固件只在 `inav-g4dbg/` 做以保护原树。
+8. **权限/容器**：`/dev/ttyACM0` 需 docker `--device`；docker bridge 网络坏 → 用 `--network none`（离线）或 `--network host`（联网装包）。
+9. **Configurator 独占 VCP**：与 `fccli.py` 冲突，先关。
+10. **改硬件（换板/重焊电机/换桨）后必做"三轴方向自检"**（§5.5），否则症状五花八门（翻/自旋/乱飘），极易误判成 PID/CoG。
+11. **别用 `mmix` 去补传感器朝向**：飞控旋转只改 `align_board_*`；改 `mmix` 会"双重补偿"→ 翻。
+12. **`motor_direction_inverted` 只管 yaw**（`mixer.c:241`）：yaw 自旋/反向时先查它。
+13. **INAV 电机编号 ≠ 物理编号**是高频坑：`mmix` 的行号 = **输出通道**，务必与真实电机一一对齐（本次主因）。
+14. **FC 在 CLI 模式时，UART2 的 MSP 不响应**：用 USB 进 CLI 读/改配置后，链路会短暂 `NO RESPONSE` → `save`（重启）或 `exit` 回正常模式，并**等 ~15–20s** 再测（重启后 UART2 MSP 就绪有延迟）。别误判成"接错线"。
+15. **电压采样（自制 target）**：`target.h` 的 `VBAT_SCALE_DEFAULT` 曾误设 **110**（=1.1:1），本板实际分压为 **11:1** → 电压只显示 ~0.4V（1S 电池）。正确值 **1100**（2026-10-10 修正源码 + 板上 `set vbat_scale = 1100` 已 `save` 持久化，重启后 `status` 显示 ~4V）。**自制 target 首次上电务必核对 `vbat_scale`/`current_meter_scale`。**
+16. **板载无气压计 → `ALTHOLD`/`POSHOLD` 当前不可用；已决定改固件加“测距 Z 分支”解锁（2026-10-14）**：INAV 模式准入看**估计器状态**——`canActivateAltHoldMode()` 要求 `estAltStatus >= EST_USABLE`，`canActivatePosHoldMode()` 还要求 `estVelStatus == EST_TRUSTED`（`navigation/navigation.c:6020-6028`）。而 `est.pos.z` 的修正只在**气压计/GPS** 分支（`navigation_pos_estimator.c` `estimationCalculateCorrection_Z`）；测距只进 AGL 估计，且 AGL 还要求 `EST_BARO_VALID`（`navigation_pos_estimator_agl.c:83`）。故无气压计/GPS 时 Z 无法收敛、模式进不去。`baro_hardware=AUTO` 开机检测不到会被写回 `NONE`（`sensors/initialisation.c:87`）。**⚠️ 更正**：旧文引用的 `navReadyAltControl`（`fc_msp_box.c:232`）在 INAV 10 源码中**不存在**，以上述估计器准入为准。计划见 §5.6。
+17. **串口设 GPS 但无 GPS 模块 → 无效**；且**别动 UART2=上位机 MSP**（会破坏链路）。本板 UART 已排满（UART1 仅RX / UART2 上位机MSP / UART3 CRSF / UART4 光流MSP）。
+18. **`msp_override_channels` 位序 = AERT（内部通道号），不是 AETR**：INAV 内部 `ROLL=0 PITCH=1 YAW=2 THROTTLE=3`（`fc/rc_controls.h`），掩码 `1<<channel`（`rx/msp_override.c:269`）；而 `SET_RAW_RC` 的**负载**顺序才是 AETR（`rcmap={0,1,3,2}`）。故"只接管三轴、油门留飞行员"= **`7`(0111)**；**`11`(1011) 会接管 roll/pitch/throttle 而放开 yaw → payload 油门(1000) 覆盖物理油门 → 空中切油**。Betaflight 掩码则是 AETR（bit2=throttle），**两家不一致，别照搬**。可用上位机实验18/20 `probe`/`MSP_RC`(105, 回读 override **之后**的通道) 确认是否真接管（**别用 `MSP_ACTIVEBOXES` 位掩码**：INAV 按"下发顺序"打包，非 box 枚举号）。
+19. **无 GPS 时配置 POSHOLD/RTH/WP 会拦截解锁（2026-10-15 核实）**：`isUsingNAVModes` 只要配置了 **POSHOLD/RTH/COURSEHOLD/CRUISE/WP** 任一开关即为真（`fc/rc_modes.c:305`）；解锁要求 `navigationPositionEstimateIsHealthy()`＝`estPosStatus>=EST_USABLE && estAltStatus>=EST_USABLE && STATE(GPS_FIX_HOME)`（`navigation/navigation.c:6376`），否则返回 `NAV_ARMING_BLOCKER_MISSING_GPS_FIX`（`:6392`）。无 GPS 时 `GPS_FIX_HOME` 依赖“解锁前由光流等建立 home”（要求 `estPosStatus>=EST_USABLE`）。**⚠️ ALTHOLD 不在该列表 → 定高不受影响**——这正是“先定高、定点后置”的原因。另：`eph` 仅在 XY 传感器更新超时时按 100/s 增长（上限 `inav_max_eph_epv`＝1000cm），**光流健康是定点稳定的前提**。`nav_extra_arming_safety=ALLOW_BYPASS`（默认）可用 YAW_HI 杆位临时绕过（无飞手时不可用）。
+20. **SURFACE（地表跟随）本板不可用——两处硬依赖气压计（2026-10-17 核实）**：① 模式盒广告条件 `sensors(SENSOR_BARO) && sensors(SENSOR_RANGEFINDER)`（`fc/fc_msp_box.c:226`）；② 地形跟随时高度控制器改读 `posControl.actualState.agl`（`navigation/navigation.c`：`terrainFollow ? agl : abs`），而 AGL 估计要求 `EST_BARO_VALID`（`navigation_pos_estimator_agl.c:83`）→ 无 baro 时 `aglAlt` 恒 0。**定高结论：用 ALTHOLD（Z 分支），平地场景与 SURFACE 等价**。
+21. **解锁排查速查（2026-10-16 实测踩坑）**：`status` 的 `Arming disabled flags` 是权威判据——`ARMSW`=ch5 不在解锁位（需 ≥1775，实测开关高档=2000）；**`THR`=油门杆必须收到最低（≈1000，非中位）**；`DSHOTBEEPER`=上电初期蜂鸣器瞬态（几秒自消）；`CLI`=USB CLI 会话中禁解锁。另：**未解锁时零点持续跟随测距 → `MSP_ALTITUDE` 的 `z` 恒≈0**（`WAS_EVER_ARMED` 前速度不积分 + 零点跟随，见 §5.7）→ **验证 z 必须"先解锁"**。TX 未开机时通道读数为失控保护值（ch5 曾见 1750，勿据此调区间）。
+22. **黑匣子 `navState` 是 `navPersistentId`，不是控制位掩码（2026-10-17 更正）**：0=UNDEFINED / 1=IDLE / 2=ALTHOLD_INIT / 3=ALTHOLD_IN_PROGRESS（`navigation.c:6568`）；`mspOverrideFlags` bit1=接管开关激活、bit0=接管流超时。详见 §5.7。
+23. **拔上位机串口 ≠ LAND（2026-10-17 源码核实）**：接管流超时（~0.7s）只把控制权**静默回落到物理遥控**（`rx.c:513` 门控）；FC 主 failsafe（LAND）只由**物理 RC 链路丢失**触发，走紧急降落状态机且**依赖高度估计**。"上位机停发 RC 借 failsafe 落地"不成立（看门狗需重新设计）。
+24. **MSP2_INAV_OPTICAL_FLOW 遥测丢符号（2026-10-17 已修，固件 `7e2d65a5`）**：`fc_msp.c:778-781` 曾用 `sbufWriteU16(dst, RADIANS_TO_DEGREES(...))`——float→uint16 **负值饱和为 0**；对照同文件有符号字段正确写法（`(int16_t)lrintf(...)`，`:603/:755`）。症状="数据永不负值"（所有方向只现一种符号）；输入链路与工具端本来是对的。**修复=显式转换 + 重编刷 hex**。
+25. **光流手持标定方法论（2026-10-17 血泪）**：① 传感器**最小工作距离 8cm**——离地 1cm 时输出 ±1000+ 垃圾；② 质量门=进入 q≥35/退出 q≤10（滞回；门限作用于设备 quality，实测显示 q≈25+ 也可能有数据，勿一刀切）；③ 手持协议必须**地面磁带点位 + 单动作 + 聊天书签**（"按秒表分步"协议不可靠）；④ **快移+慢回**：目标方向产生单符号大脉冲（慢回低于量化门限）；⑤ 四方向需**两两反号自洽**才算测对。
+26. **opflow align 速查（`applySensorAlignment`，`boardalignment.c:112`）**：平面变换 CW0=(x,y)｜CW90=(y,−x)｜CW180=(−x,−y)｜CW270=(−y,x)｜CW0FLIP=(−x,y)｜CW90FLIP=(y,x)｜CW180FLIP=(x,−y)｜CW270FLIP=(−y,−x)。目标约定（`navigation_pos_estimator_flow.c:86-87`）：**右→+X、前→−Y**。本机（旧 CW0FLIP 实测 右→+Y/前→−X）→ 唯一解 **CW90**（CLI 值名 `CW90`）。
+27. **MTF-02P 有效区间与标定限制（2026-10-17 实测）**：慢于 ~50°/s（0.25m 高度 ≈0.2m/s）**死区截断**（4×1m、每段 7-8s 的慢滑行积分只记到 19%）；快于 ~400°/s（=7rad/s 规格上限）**饱和/模糊伪值**（手持快推积分虚高 2–2.6×）。**可靠区间 ≈100–400°/s**（0.25m 高 ≈0.44–1.7m/s）。→ 手持"已知距离"标定不可行；`opflow_scale` 维持 1.133，待**飞行中标定**。附带结论：**POSHOLD 对 <~0.2m/s 慢漂移天然不敏感**（死区物理限制，非参数问题）。
+28. **CLI `aux` 第二列 = 永久 ID（permanentId），不是 boxId（2026-10-17 踩坑）**：`cliAux` 用 `findBoxByPermanentId`（`cli.c:789`）解析；参数不足 4 个会**静默 memset 清空该槽**。对照表：ARM=0、ANGLE=1、ALTHOLD=3、**NAV POSHOLD=11**（boxId=9！）、NAV RTH=10、**MSP RC OVERRIDE=50**（boxId=41）。写 POSHOLD 用 `aux 5 11 2 1700 2100`。
+29. **`nav_mc_hover_thr` 是电池档案级参数（2026-10-18 踩坑）**：CLI 读/写只作用于**当前活动档案**；飞行落在没标定的档案 = 回默认 1300 → 定高拨入下沉。**标定必须三档全写**（`battery_profile 1/2/3` 逐档 `set nav_mc_hover_thr = …`，最后回 1 再 `save`）。
+30. **ch7 快速连拨 = 手动紧急降落开关（2026-10-18 踩坑）**：4s 内 5 次进入 POSHOLD 区间 → 翻转 `manualEmergLandActive`（`navigation.c` `checkManualEmergencyLandingControl`）；该标志优先于一切导航模式 → 台架表现为"定点永远挂不上"（反复回退空闲）。**上锁复位**；纪律：**一次性拨到位**。
+31. **`MSP_NAV_STATUS(106)` "异常"（2026-10-18 挂起 → 2026-10-19 结案：工具命令号错）**：实测恒回 **18 个零字节**；真因 = INAV 10 里 **106=`MSP_RAW_GPS`**（18B，无 GPS 即全零）、**`MSP_NAV_STATUS`=121**（9B）——工具 `Host_Lichee_RV_Nano/experiments/2026-10-12_20_paradigm_select/msp.h`（及 18/19 副本）把 NAV_STATUS 写成了 106。**修法：改 121 并重编板上 `mon`**；改前 `mon` 的 navS 恒 0 不可信。（DFU 读回=构建 hex 正确，"半刷"排除无误。）
+32. **黑匣子会停写/被清空（2026-10-18 实测）**：`MSP_DATAFLASH_SUMMARY(70)` 返回 `ready=1, sectors=256, total=16M`；**`used` 长期 0 且不增长 = 没在写**。先查 `feature`（BLACKBOX 开）/ `blackbox_device=SPIFLASH`；都不是再怀疑 flash 芯片或清空操作。**Configurator → Blackbox 页的 Erase 按钮会清空全部日志——2026-10-19 已误触清空过一次，千万别点。**
+33. **USB VCP 重启后常不自动枚举（2026-10-18）**：FC 每次重启（save/exit/刷机）后 `/dev/ttyACM0` 可能消失或成"僵尸口"（设备在但收发不通）→ **物理重插**即可；**`fccli` 与 Configurator 互斥**（同开会读到对方流量乱码，如 `$X<...`）。板子 RNDIS 同样常掉（IP 在 `10.222.2.1` / `10.222.1.1` 间漂），掉了就重插线。**刷固件一律 `.hex`（保配置区）；`.bin` 会清零配置——`build/` 里那个 10-15 的旧 `.bin` 别碰。**
+34. **黑匣子日志字段组被配置关闭（2026-10-19 发现）**：firmware 自带 `NAV_POS/NAV_ACC/NAV_PID/MAG/…` 字段组（`blackbox.c:442+`，条件 = `includeFlags`）；FC 默认只存一部分（本机接手的 0x1FF0，缺 NAV_*）→ 坠机日志无 `navPos/navVel`，导致前几日分析全部"盲判"。开启：CLI `blackbox`（看 Enabled 列表）/`blackbox NAV_POS`/`blackbox NAV_ACC` + `save`；`get` 无此项，读回用 MSP2 0x201A（includeFlags u32 @payload[6]）。
+35. **台架"运动测试"的有效区间陷阱（2026-10-19 血泪）**：光流 <~50°/s **死区**、>~400°/s **饱和**、`q<35` **不参与**；且估计器在 `!estXYCorrectOk` 时走"**速度衰减到零**"（`navigation_pos_estimator.c:838-841`）——于是"慢推"和"猛抖"都会让"光流修正 vs 真实运动"呈**负相关**，且**与 align_opflow 取值无关**（CW0/CW180/CW270 结果几乎相同）。→ **手持运动类实验不能用来判对齐/符号**；只在有效区间内 + 用独立参照（IMU/卷尺）才有意义。
+36. **解锁边缘态（2026-10-19）**：油门低端读数在 `mincheck=1100` 边缘（1064–1090）会导致"看起来解锁、实际被拦"；且无电池时没有声音提示 → 必须用 MSP 确认（0x2000 `armingFlags` bit2 或 113 的 ARM 位）。失败时 `ch5 复位→重拉`；重启后必须重新 YAW_HI 手势（右偏航打满 + ch5）。建议在遥控器端校准油门低端到 ~1000。
+37. **MSP_RC(105) 无 count 字节（2026-10-18 晚）**：INAV 10 的 MSP_RC 载荷是**纯 N×u16**（内部序 roll,pitch,yaw,throttle,aux1..）；`msp_live.py` 注释"byte0=count"是错的（mon/paradigm 的解析是对的）。USB 直读 RC 用它时注意。
+38. **判定定点/姿态问题时优先黑匣子**：`mon` 的 navS（工具未修）不可信；`navState`=navPersistentId（0=UNDEFINED/1=IDLE/2=ALTHOLD_INIT/3=ALTHOLD_IN_PROGRESS；POSHOLD 另有 6/7）；`navTgtVel/navVel` 是判"位置环方向/增益"的决定性数据（2026-10-19 起可用）。
+39. **`opflow_scale` 校准轴：yaw 无效，必须 roll/pitch tilt（2026-10-20 结案）**：`sensors/opflow.c:239-242` 累计 `bodyRate[X/Y]`（roll/pitch）+ flow，纯 yaw 不产生 X/Y；30s 内 `bodyAcc>3600°` 才保存。正确动作：绕水平轴 roll/pitch 倾斜 ±30–40°、60–90°/s、q≥35、0.3–0.6m、纹理垫、不平移；可来回倾斜（代码累计幅值）。yaw 校准得到的 5.19 **无效**；tilt 实测 4.4/4.49/4.73；默认 10.5 不是目标。`opflow_scale` 是**分母**（`opflow.c:208`），越小估计速度越大。
+40. **`align_board_pitch=-42` 是假补偿，不是配平（2026-10-20）**：它把传感器坐标系硬转 4.2°，造成持续前倾/“往前补太多”；10-17 已知良好是 0。静态偏置/CoG 不要用 `align_board_*` 补；用 A1 加速度计校准/水平校准。**`align_board_*` 只补飞控物理安装角**。
+41. **活动 `control_profile` 要检查（2026-10-20）**：`diff all` 末尾的 `control_profile N` 才是活动档；10-17 已知良好是 **1**，漂移成 3 会换成默认 rates/expo/FF/TPA（手感怪、响应不同）。`battery_profile`/`mixer_profile` 也要看末尾；`nav_mc_hover_thr` 是 battery_profile 级，三档都要写。
+42. **“干净”的定点测试条件（2026-10-20）**：满电（vbat≥3.8V）、**不打杆**（`rcData` 1500）、**目标不动**（`navTgtPos` 不被杆移）、`flightModeFlags=523`/`navState=6/7`、5s、低空软区、低速退出。`11111` 的 I=20 测试被 508us 打杆 + 2.91–3.19V + 目标跳动污染，不能归因；1.09s/油门 1014/电机 1080 的日志是 disarmed 尾段，不能判电机/起飞。
+43. **2–3cm/s 慢漂在光流死区以下，scale/PID 都修不了（2026-10-20）**：光流 <~50°/s 死区，0.3m 高度约 0.26m/s；慢漂 0.02–0.03m/s 光流看不见。`navEPH` 低不代表 scale 对（EPH 是不确定性，不是系统性偏差）；I/P 只能减小可见误差，最终靠视觉/绝对参考。纯光流 POSHOLD 的慢漂是原理性限制。
+44. **`mmix`/前电机排查要证据（2026-10-20）**：`motor[]` 是命令不是推力；标准 QuadX 下 yaw 正常、Motor 页位置/转向对，就不支持“混控反了”。偶发起动卡顿先查桨/机臂间隙、螺丝、ESC 信号；换电机前先做 RPM/电流/前后对换。10-10 的“翻/自旋”才是编号/混控类问题。
+45. **定高 ≠ 定点（2026-10-22 反复踩）**：ALTHOLD 只闭环 Z，XY 是开环；`flightModeFlags=11`/`navState=3` 就是定高。POSHOLD 必须看到 `flightModeFlags` 含 512（523）、`navState=6/7`；否则“定点漂”其实是定高漂。近期三条日志都没有干净 POSHOLD。
+46. **0.75s 的 POSHOLD 不是样本（2026-10-22）**：10-21“第二次高度摔”只挂 0.75s，且入口 `navVel x≈+39cm/s`；POSHOLD 目标 = 当前位置 + 速度×减速时间，会先刹车。判 POSHOLD 必须入口速度接近 0、无杆、目标固定、至少 5s。
+47. **定高无杆仍持续加速 = 真实力（2026-10-22）**：10-22 定高日志无杆段约 0.3m/s² 右向加速，`attitude roll≈0`，m2 高/m1 低 116–160us，`navEPH` 8–15；这不是光流慢漂，先查 `align_board`/A1 水平/CoG/电机桨。2026-10-23 因更新机械结构，已读回 `align_board_roll=0`、`align_board_pitch=-5`（-0.5°）；此前口头 0/1 实际未生效。
+48. **I2C Errors=50（2026-10-22）**：`i2cHandleHardwareFailure()` 每次硬件失败 +1；本板 BARO/MAG=NONE，开机探测可能累计。位置传感器是 MSP、IMU 是 SPI，不直接解释 XY 漂移；先看 `status` 两次是否继续增长，再查总线/供电。
+49. **成功判据要先定（2026-10-22）**：纯光流 + 无磁力计 + 无 GPS 不可能零漂；2–3cm/s 是死区以下。建议 5s 不持续加速/不发散/误差≤30cm×3，再追求 10s；要求 5cm 内需外部参考。不要用加 P 硬压。
+
+---
+
+## 7. 参考资料索引
+
+**内部**
+- 下位机总览（目录/常用命令/接口表）：`../README.md`
+- 本工作区详情（板级信息/移植要点/补丁）：`README.md`
+- **上下位机对接方案（接线/INAV 配置/验证清单/测试计划）**：`connection/README.md`
+- 可粘贴 INAV 配置：`drone/config/g473_msprc.txt`
+- 上位机接口抽象：`../../Host_Lichee_RV_Nano/AGENT_GUIDE.md`
+- 项目总览 / AI 上下文：`../../README.md`、`../../AGENTS.md`
+- AT32 阶段经验（**已冻结**，仅参考）：`../../archive_at32/agent_at32.md`
+- INAV 上游 AI 上下文：`drone/inav/AGENTS.md`
+
+**外部**
+- MTF-02P 手册：https://micoair.cn/zh/docs/sensors/sensors/mtf-02-02p-sensors
+- INAV 官方：https://github.com/iNavFlight/inav
+
+---
+
+## 8. 交接清单（下一个人 / 新 AI 接手时）
+
+- [ ] 确认机器分工与环境（i5 能编译？`arm-none-eabi-gcc`、cmake、ninja、docker `tpuc_mlir:latest`）。
+- [ ] 拔桨，USB 接 FC，`fccli.py` 读 `version`/`status`，确认固件为我们的 INAV 10.0.0。
+- [ ] 确认 `connection/README.md` 的接线（TX/RX 交叉、共地）与 INAV 配置仍在。
+- [ ] 复现链路：LicheeRV 上跑 `msp_probe /dev/ttyS0 230400`。
+- [ ] **当前优先看 §5.10（2026-10-22 更新）**：仍无干净 POSHOLD；10-22“一直在飘”只有 ALTHOLD，定高无杆约 0.3m/s² 右加速/姿态近水平/m2-m1 差 116–160us；先查水平/CoG/电机，满电无杆 ALTHOLD 10s×3，再做干净 POSHOLD 5s×3；**不要再加 P**。详见 `../../AGENTS.md`。
+- [ ] 每完成一步 `commit && push`。

@@ -27,7 +27,13 @@
 | 19 | 2026-10-12 | [2026-10-12_19_opflow_hold](./2026-10-12_19_opflow_hold/) | **上位机光流水平阻尼/定点**（读 `MSP2_INAV_OPTICAL_FLOW` 0x2001 + `MSP_SONAR_ALTITUDE` 58 → 估水平速度 → roll/pitch 阻尼） | 🟡 `mon` 已验光流数据通路（q≈40–60）；`damp` 待台架/真机 | **进行中** |
 | 20 | 2026-10-12 | [2026-10-12_20_paradigm_select](./2026-10-12_20_paradigm_select/) | **接管三轴 + 范式/定点/定高选择**（ch6>1300 或 ch8>1300 接管；ch6→范式B；ch7→定点/定高；基础**光流阻尼**始终叠加） | 🟡 **FC aux 已改并 `save`**；`mon`/`dry` 已验证（开关读值/`ovr` 判定/模式切换/视觉符号）；相机倒装 `CAM_ROT`+`alt`修复已加 | **进行中**（待台架真机与调参） |
 | 21 | 2026-10-15 | [2026-10-15_21_flow_quality](./2026-10-15_21_flow_quality/) | **阶段 0：光流质量实测**（地面材质/高度/光照对 `q` 的影响；对照 INAV VALID 门限 35） | ✅ **定论**：**表面纹理主导**——光滑面 `q≈20–24`（低于门限，光流不启用）；鼠标垫/纹理垫 `q≈37–53`（≥35，可用）；强光直射反而更差 | **完成**（结论：铺纹理地垫 + 高度 0.3–0.6m + 上电等数秒） |
+| 22 | 2026-10-23 | [2026-10-23_22_bench_gate](./2026-10-23_22_bench_gate/) | **权限门验证**（未授权持续发中性 / 授权判据=`ACTIVEBOXES`+`BOXIDS` 对照 / 停发回落）；不含视觉 | 🟡 **真 FC 拔桨 A/B 通过**：ch6 1000↔1503 → PHYS↔AUTH，`BOXIDS[24]=pid50`，mask 位翻转；AUTH 时油门 989 不变（mask=7 实机证据） | **进行中**（C 停发回落、`--wiggle` 轴级跟随、ch8 单独 OR 待验） |
+| 23 | 2026-10-25 | [2026-10-25_23_vision_gate](./2026-10-25_23_vision_gate/) | **视觉+权限门合并**（绿目标 HSV → 偏移 → EMA/滞回 → roll/pitch；**仅授权时发非中性**；dry 干跑） | 🟡 交叉编译通过（`vision_gate`，RISC-V）；符号/偏置/增益全 env 可调 | **进行中**（板上 dry 静态标定：四方向符号 + `MIROCFLY_BIAS`） |
+| 24 | 2026-11-03 | [2026-11-03_24_vision_control](./2026-11-03_24_vision_control/) | **控制端框架**（L0 VIO 占位 / L1 UDP `vif_frame_t` → L2 选目标/平滑 → L3 映射 → L4 门控+MSP）+ **状态机**（IDLE→ALIGN→APPROACH→COMMIT→IMPACT→RECOVER） | 🟢 **i5 + mock 跑通**：static 全链路、step 映射正确（300px→±150µs）、loss 回退 IDLE、超时链正确 | **进行中**（VIO 解析、mask=15 起飞/降落、真机 AUTH_OFF 验证） |
 
 ## 相关文档（上层）
-- `../README.md`（项目总览）、`../agent.md`（AI 上下文）
-- `../AGENT_GUIDE.md`（上位机开发指导）、`../difficulty_and_method.md`（困难与解决，编号 A/B/…）
+- `../README.md`（项目总览）、`../AGENTS.md`（AI 契约 + 上下文）
+- `../AGENT_GUIDE.md`（上位机开发指导）、`../../../困难与解决办法.md`（全项目踩坑档案）
+| 26 | 2026-11-08 | [2026-11-08_26_vision_rtsp](./2026-11-08_26_vision_rtsp/) | 检测+画框+RTSP 叠加 + UDP；自绘矩形/点阵数字（无 OpenCV）；`vif_stat` 链路体检 | 🟢 已跑通（复用 exp10 mf_tdl） | 已被 27 取代 |
+| 27 | 2026-11-08 | [2026-11-08_27_mirovision](./2026-11-08_27_mirovision/) | **视觉服务 mirovision**：M1 采集→推理→UDP、M2 可选 RTSP 叠加、M3 自恢复/守护/开机自启；`--record` + `vif_play` 录制回放 | 🟢 **在用**：50 张校准后 conf 0.94；倒装 `--rot180`；18–21fps | 生产候选 |
+| 28 | 2026-11-08 | [2026-11-08_28_fc_link](./2026-11-08_28_fc_link/) | **上下位机 MSP 链路**：自检工具 `msp_link`（probe/rate/loopback）+ 接线与 INAV 配置手册 | 🟢 **已打通**：ttyS0@230400，4 命令 20/20 | 授权门待台架验证 |

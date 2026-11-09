@@ -1,0 +1,17 @@
+status
+MCU: STM32F722xx CLK=216MHz, Vref=3.29V, Core temp=40degC
+STACK: 2048b (0x20010000)
+CONFIG: CONFIGURED (4592b / 16384b)
+
+DEVICES DETECTED: SPI=1, I2C=1 (11 errors)
+GYRO: (1) ICM42688P enabled locked dma shared
+ACC: ICM42688P
+BARO: DPS310
+GPS: NOT ENABLED
+OSD: MSP (53 x 20)
+FLASH: JEDEC ID=0x00ef4018 16M
+
+System Uptime: 69 seconds
+CPU:30%, cycle time: 124, GYRO rate: 8091, RX rate: 0, System rate: 10
+Voltage: 0.88V (0S battery - NOT PRESENT)
+Arming disable flags: RXLOSS CLI

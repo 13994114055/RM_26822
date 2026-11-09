@@ -9,7 +9,7 @@ MirocFly 是一架具备**自主视觉撞击 + 快速返航**能力的室内无�
 
 **核心任务**：通过 CSI 摄像头捕捉画面，识别目标（不规则物体，可能多个，需分析选择），自主飞向目标并撞击，撞击后自稳，并在 **30 秒内**返回起飞点（"家"）。
 
-> ⚠️ **下位机方案更替（重要）**：最初选用 **AT32F435 直驱空心杯电机**，实测**升力仅约 59g** 而**整机约 76g** → **无法起飞**。现新主控定为 **BetaFPV G473（STM32G474，无刷 + 四合一 ESC）**，与**此前烧毁的板子同款、已重购**；固件为**自研移植的 INAV 10.0.0（STM32G4）且当前能飞**。**但尚未"本土化"**：未对接上位机 MSP、未适配光流，**接口/UART 映射未重定**（故旧接口约定**不再默认成立**）。AT32 阶段经验已存档于 `Low_MCU/archive_at32/agent_at32.md`（已冻结）；新主控详情见 `Low_MCU/new_mcu/README.md`。
+> ⚠️ **下位机方案更替（重要）**：最初选用 **AT32F435 直驱空心杯电机**，实测**升力仅约 59g** 而**整机约 76g** → **无法起飞**。之后改为 **BetaFPV G473（STM32G474，无刷 + 四合一 ESC）** + 自研移植 INAV 10.0.0（STM32G4），该阶段**已于 2026-11-04 冻结**（目录 `Low_MCU/BateFPV_G473/`，只读参考）。**当前下位机 = Lyi F722 平台（自带气压计），见 `Low_MCU/Lyi_F722/`**。AT32 阶段经验存档于 `Low_MCU/archive_at32/agent_at32.md`（已冻结）。
 
 ## 项目双重目标
 
@@ -36,7 +36,7 @@ LicheeRV Nano (SG2002)  ──  Linux视觉层: 采集→识别→目标选择�
         └── I2C?   磁力计 + 气压计
 ```
 
-> ⚠️ 图中 `UART?` 表示**新主控 G473 的接口映射尚未重定**：该板只有 UART1~4 + VCP（无 UART5/7），默认 CRSF 在 UART3。详见 `Low_MCU/new_mcu/README.md`。
+> ⚠️ 图中 `UART?` 表示**新主控 G473 的接口映射尚未重定**：该板只有 UART1~4 + VCP（无 UART5/7），默认 CRSF 在 UART3。详见 `Low_MCU/BateFPV_G473/README.md`。
 
 **设计原则**：上位机 = 大脑（视觉/决策），下位机 = 稳定执行器；任务逻辑与通信协议解耦——**两阶段演进、甚至下位机主控更替，上层逻辑都零改动**。
 
@@ -62,28 +62,29 @@ IDLE → ARM → TAKEOFF → SEEK(搜索目标) → APPROACH(接近撞击)
 ## 关键决策（已确认）
 
 - **通信协议**：近期 **MSP**（INAV 串口仅支持 MSP）；远期自定义帧 `0xAA 0x55 | X | Y | Area | Status | CRC8`。
-- **RC 优先接管**：INAV 的 `MSP RC Override` 模式（固件自带 `BOX_MSP_RC_OVERRIDE` + `msp_override_channels`，**需在 CLI 配置、默认不覆盖**），遥控器拨杆切换，硬件级兜底。**开关映射（2026-10-12 定稿）**：`ch5`=解锁；**`ch6>1300 或 ch8>1300` = 上位机接管三轴**（同 modeId 挂两条 aux = **OR**）；`ch8>900`=ANGLE；`ch6`=追踪范式（当前全 **B**，`[1700,2100)` 预留 A）；`ch7 [1300,1700)`=**定点** / `[1700,2100)`=**定高**（定高暂留桩，需接管油门）。**⚠️ 掩码位序 = 内部通道号 AERT**（`ROLL=0 PITCH=1 YAW=2 THROTTLE=3`，非负载 AETR）：只接管三轴、油门留飞行员 = **`7`**（`11` 会误接管油门→切油）。
+- **RC 优先接管**：INAV 的 `MSP RC Override` 模式（固件自带 `BOX_MSP_RC_OVERRIDE` + `msp_override_channels`，**需在 CLI 配置、默认不覆盖**），遥控器拨杆切换，硬件级兜底。**开关映射（2026-10-12 定稿）**：`ch5`=解锁；**`ch6>1300 或 ch8>1300` = 上位机接管三轴**（同 modeId 挂两条 aux = **OR**）；`ch8>900`=ANGLE；`ch6`=追踪范式（当前全 **B**，`[1700,2100)` 预留 A）；`ch7 [1300,1700)`=**定高（ALTHOLD）** / `[1700,2100)`=**定点（POSHOLD）**。**⚠️ 掩码位序 = 内部通道号 AERT**（`ROLL=0 PITCH=1 YAW=2 THROTTLE=3`，非负载 AETR）：只接管三轴、油门留飞行员 = **`7`**（`11` 会误接管油门→切油）。
 - **边缘 AI**：YOLOv8n → INT8 量化 → TDL SDK 部署 SG2002 NPU（同芯片实测 ~17–27 FPS），HSV 仅调试/兜底。
 - **相机方案**：**用 scpcom 镜像 + scpcom 中间件**（官方镜像 GC4653 中间件坏；相机硬件本身正常）。自写程序必须**用 scpcom 的公有头编译、链接板上 scpcom 的库**，**不可混用 sipeed/官方中间件**（混用会导致取帧全黑）。
   - **相机光学（GC4653 官方镜头）**：焦距 **3.05mm** / F2.5 / **畸变 5%** / FOV **对角 90°、水平 81°、竖直 51°**（1/3"，2560×1440，2.0µm）。固定前视装法：**pitch 下倾约 10–15°**（竖直 FOV 宽、对角度不敏感），**倒装用 `MIROCFLY_CAM_ROT=180`**，俯仰基准用 `pitch_bias_px` 标定。
 - **撞击检测**：近期上位机轮询 `MSP_RAW_IMU` 加速度突增；远期下位机 IMU 检测 + 状态机。
 - **返航**：**近期不做返航**；失效统一 `LAND`（慢降）。远期厘米级返航由**外挂 FPGA** 提供定位（接口/协议未定义，单独立项）。
 - **定高/定点**：**改为下位机固件实现**（**上位机定高冻结**）——无气压计/无 GPS 时 INAV 的 `est.pos.z` 无测距来源，需在固件加“测距 Z 分支”。**定高优先**（ALTHOLD 不触发无 GPS 解锁拦截），**定点（POSHOLD）条件重开**——先做**阶段 0 光流/地面测试**（光滑 vs 纹理垫、光照、高度；`paradigm mon` 测 q/方向/测距误差）。
-- **全自动目标**：起飞→降落全自动，人只负责开机；人工输入仅 **`ch5`（锁桨）+ `ch8`（接管）**。**接管分两步**：一期接管三轴（`mask=7`），二期接管油门（`mask=15`）。**看门狗**（上位机心跳+监督线程）列入计划，无人飞行前必做。详见 `agent.md` §3.5。
+- **全自动目标**：起飞→降落全自动，人只负责开机；人工输入仅 **`ch5`（锁桨）+ `ch8`（接管）**。**接管分两步**：一期接管三轴（`mask=7`），二期接管油门（`mask=15`）。**看门狗**（上位机心跳+监督线程）列入计划，无人飞行前必做。详见 `AGENTS.md` §3.5。
 
 ## 硬件规格速览
 
 - **上位机**：LicheeRV-Nano（SG2002，256MB DDR3，1TOPS NPU，MIPI-CSI 摄像头，USB-RNDIS 网络）
-- **下位机（新）**：**BetaFPV G473（STM32G474，BMI270 IMU，四合一 DSHOT ESC）**，与烧毁的同款**已重购**；**自研移植 INAV 10.0.0（STM32G4）已能飞**；**本土化已落地**：上位机 MSP（UART2 @230400）链路已打通；**2026-10-10 解决"离地即翻/自旋"**（根因＝**电机输出编号与物理接线错位**；mixer 轮换版 + `motor_direction_inverted=OFF` + `align_board_roll=1800`），现**能起飞、不再自旋**。详见 `Low_MCU/new_mcu/AGENT_GUIDE.md`
+- **下位机（新）**：**BetaFPV G473（STM32G474，BMI270 IMU，四合一 DSHOT ESC）**，与烧毁的同款**已重购**；**自研移植 INAV 10.0.0（STM32G4）已能飞**；**本土化已落地**：上位机 MSP（UART2 @230400）链路已打通；**2026-10-10 解决"离地即翻/自旋"**（根因＝**电机输出编号与物理接线错位**；mixer 轮换版 + `motor_direction_inverted=OFF` + `align_board_roll=1800`），现**能起飞、不再自旋**。详见 `Low_MCU/BateFPV_G473/AGENT_GUIDE.md`
 - **下位机（原，已淘汰）**：AT32F435（288MHz 超频，1MB Flash/128KB SRAM，直驱空心杯——升力不足）
 - **接口约定（⚠️ AT32 阶段历史约定，新板未落实）**：UART1=MSP(上位机)、UART7=CRSF(RC)、UART5=光流、SPI1=IMU、I2C2=磁力计/气压计；波特率 UART1=460800、UART5=115200、UART7=4800。**新板 G473 资源不同（仅 UART1~4+VCP），需重映射**
 
 ## 当前状态与下一步
 
+- **2026-10-23 当前交接**：纯光流定点暂停（仍有点飘，不再继续调）；转上下位机通信 + 视觉识别/接近/撞击。因机械结构更新，俯仰安装补偿改为 -5（-0.5°）、横滚 0，已保存读回。FC 定高可用；注意旧 exp20 的 ch7 语义与当前 FC 相反，先统一再飞。完整状态、故障树和下一步见 `AGENTS.md`。
 - **已打通**：上位机镜像（scpcom）SSH 可登录；**相机链路全通**——板载 `test_mmf` 出真图，且**自写相机层 `experiments/2026-09-26_04_vision_module/`（Form A）出真图**、**`experiments/2026-09-26_05_rtsp_stream/` 打通 RTSP 实时预览**、**`experiments/2026-09-26_06_hsv_green/` 打通 HSV 绿色检测（输出 offset/area）**、**`experiments/2026-09-26_07_msp_link/` 打通 MSP 链路（PTY 模拟 FC 自测）**、**`experiments/2026-09-26_08_vision_control/` 写出"识别绿色并飞向"闭环程序**；**阶段 2 的 NPU 部署与量化通路已通**（`experiments/2026-09-26_09_npu_demo/`：底层 cviruntime + 高层 TDL，官方 YOLOv8n INT8 检测 17.6 FPS；`experiments/2026-09-27_10_tdl_infer/`：**可复用推理层 + 相机检测 + RTSP 叠加**；`experiments/2026-09-28_11_quantize/`：**TPU-MLIR 把 ONNX 量化成 cv181x INT8 cvimodel，板上 NPU 43.9 FPS**）；`experiments/2026-09-29_12_armor_led/`：**传统 CV 装甲板（红/蓝 LED 灯条）PC 原型**，合成集召回/精确 100%、中心误差 0.34px，不依赖训练）。已克隆 scpcom 源码树 `LicheeSG-Nano-Build_scpcom`；opencv-mobile/TDL 参考就绪。**闭环系列 14–20 已台架/板端打通**：14 EMA+丢检滞回+FC遥测、15 RTSP 叠加、16 IMU 撞击、17 状态机干跑、**18 操控下位机（MSP RC Override，台架+静态验证）**、**19 光流水平阻尼（数据通路已验）**、**20 接管三轴+范式/定点/定高选择（`mon`/`dry` 已验证）**；索引见 `experiments/README.md`。
 - **黑帧根因（已解）**：**两问题叠加**——① 中间件版本混用（链了 sipeed，须用 **scpcom 公有头 + 板上 scpcom 库**）；② 抓到**流水线启动首帧**（须先丢前导帧）。次要：① 输出文件自动清理（限制 SD 占用）；② 下位机主控更替已落地（G473 能飞、MSP 链路已通、**方向类问题已解决**）。进度见 `Low_MCU/README.md`。
-- **定高已落地并首飞（2026-10-17）**：测距 **Z 分支固件**已刷（`Low_MCU/new_mcu/drone/inav-g4alt/`）；`ch7≥1300`＝定高（`aux 4 3 2 1300 2100`）；台架解锁后 z 跟踪测距 ±3cm；**首次定高试飞**黑匣子（`~/Downloads/第一次定高.TXT`）证实 `ANGLE｜NAV_ALTHOLD` 真实生效、`navFlags bit0=1`（高度估计可信）、爬升至 ~1.66m；结尾 ~14.4s 翻滚坠机**已归因并修复**（`nav_mc_hover_thr` 未标定→1585；高度上限 200→400cm；详见下位机指南 §5.7）；水平漂/灵敏度**暂缓**（当前主线：下位机调稳 → 上位机绿色跟踪）。
-- **光流链路打通（2026-10-17 深夜）**：修复 MSP2 光流遥测符号 bug（`fc_msp.c` float→u16 饱和；重编刷 hex，新版本 `7e2d65a5`）→ 四组标定 **`align_opflow=CW90`**（复测 右→+X、前→−Y 命中）；`opflow_scale` 维持 1.133（手持标定受死区<~50°/s 、饱和>~400°/s 两头污染 → 待飞行中标定）→ **P1 已写入**（`inav_allow_dead_reckoning=ON` + `aux 5 11 2 1700 2100`；POSHOLD 永久ID=11）→ 下一步台架验 POSHOLD → 真机低空定点 + scale 飞行标定。`SURFACE` 模式不可用（两处硬依赖气压计）。详见 `Low_MCU/new_mcu/AGENT_GUIDE.md` §5.7/§6-20~28。
+- **定高已落地并首飞（2026-10-17）**：测距 **Z 分支固件**已刷（`Low_MCU/BateFPV_G473/drone/inav-g4alt/`）；`ch7≥1300`＝定高（`aux 4 3 2 1300 2100`）；台架解锁后 z 跟踪测距 ±3cm；**首次定高试飞**黑匣子（`~/Downloads/第一次定高.TXT`）证实 `ANGLE｜NAV_ALTHOLD` 真实生效、`navFlags bit0=1`（高度估计可信）、爬升至 ~1.66m；结尾 ~14.4s 翻滚坠机**已归因并修复**（`nav_mc_hover_thr` 未标定→1585；高度上限 200→400cm；详见下位机指南 §5.7）；水平漂/灵敏度**暂缓**（当前主线：下位机调稳 → 上位机绿色跟踪）。
+- **光流链路打通（2026-10-17 深夜）**：修复 MSP2 光流遥测符号 bug（`fc_msp.c` float→u16 饱和；重编刷 hex，新版本 `7e2d65a5`）→ 四组标定 **`align_opflow=CW90`**（复测 右→+X、前→−Y 命中）；`opflow_scale` 维持 1.133（手持标定受死区<~50°/s 、饱和>~400°/s 两头污染 → 待飞行中标定）→ **P1 已写入**（`inav_allow_dead_reckoning=ON` + `aux 5 11 2 1700 2100`；POSHOLD 永久ID=11）→ 下一步台架验 POSHOLD → 真机低空定点 + scale 飞行标定。`SURFACE` 模式不可用（两处硬依赖气压计）。详见 `Low_MCU/BateFPV_G473/AGENT_GUIDE.md` §5.7/§6-20~28。
 - **下一步**：① **定点推进**：P1 已写（dead_reckoning + aux5=POSHOLD）→ 台架验模式 → 真机低空定点 + scale 飞行标定；② 上位机接管三轴飞行（一期，`experiments/2026-10-12_20_paradigm_select/`）待真机短飞；③ 光流质量一般（`q≈40–60`）；**注：已决定不为定高定点改造地面/光照**；④ 定点（POSHOLD）：P1 已写、三道门已核（详见下位机指南 §5.7）→ 台架/真机验证；⑤ NPU 检测接相机实时帧（`09` 步骤3）；⑥ 自训/量化（4060）；⑦ 调 PID 压姿态振荡（4.3Hz 主峰，含坠机段待重测）。
 
 ## 文档导航
@@ -93,11 +94,11 @@ IDLE → ARM → TAKEOFF → SEEK(搜索目标) → APPROACH(接近撞击)
 - `Host_Lichee_RV_Nano/experiments/README.md` — **上位机实验档案索引**（01~20，每次尝试一个目录）
 - `Host_Lichee_RV_Nano/AGENT_GUIDE.md` — 上位机开发指导（持续更新）
 - `Host_Lichee_RV_Nano/LicheeSG-Nano-Build_scpcom/` — **scpcom 源码树**（与板上镜像同源；相机样例在 `middleware/sample/test_mmf/`）
-- `Low_MCU/README.md` — **下位机总览**（接口约定 + 新主控 `new_mcu/`）
+- `Low_MCU/README.md` — **下位机总览**（接口约定 + 新主控 `BateFPV_G473/`）
 - `Low_MCU/archive_at32/agent_at32.md` — 下位机 AT32 经验存档（**已冻结**）
 - **`tools/README.md`** — **调试/分析工具集**（`msp_probe` 链路验证、`msp_live.py` 实时监控、`telem_mon` 板上只读遥测、`blackbox_decode.py` 黑匣子解码）
-- `agent.md` — AI Agent 工作空间上下文（决策/协议/进度）
-- `Host_Lichee_RV_Nano/difficulty_and_method.md` — 困难与解决办法（复盘/面试用）
+- `AGENTS.md` — AI 契约 + 项目上下文（决策/协议/进度，含原 agent.md 内容）
+- `困难与解决办法.md` — 困难与解决办法（复盘/面试用）
 - `Host_Lichee_RV_Nano/diary.md` — **上位机操作手册**（如何编译/部署/运行各功能与排错）
 
 ## 第三方依赖（不入库，需自行获取）

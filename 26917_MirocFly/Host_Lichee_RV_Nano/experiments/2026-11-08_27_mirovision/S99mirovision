@@ -1,0 +1,14 @@
+#!/bin/sh
+# 开机自启：把 run_mirovision.sh 放到板上 /etc/init.d/ 并 chmod +x
+case "$1" in
+  start)
+    [ -x /root/models/run_mirovision.sh ] && /root/models/run_mirovision.sh bg
+    ;;
+  stop)
+    [ -f /tmp/mirovision.pid ] && kill "$(cat /tmp/mirovision.pid)" 2>/dev/null
+    killall mirovision 2>/dev/null
+    ;;
+  restart)
+    "$0" stop; sleep 2; "$0" start
+    ;;
+esac

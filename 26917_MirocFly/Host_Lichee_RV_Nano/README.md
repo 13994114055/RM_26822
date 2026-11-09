@@ -1,9 +1,11 @@
 # MirocFly 上位机（LicheeRV Nano / SG2002）
 
+> ⚠️ **IP 变更（2026-11-03）**：板子地址现为 **双 IP**：USB `10.117.42.1` / WiFi `192.168.1.165`（2026-11-05，SSID `Potential-Robot`）；本文与各实验 README 中出现的 `10.222.2.1` 属于历史命令，已作废。
+
 > 本目录是 MirocFly 自主撞击无人机的**上位机（大脑）**开发区：负责 **采集 → 识别 → 目标选择 → 任务决策**，
 > 并通过串口把控制量下发给飞行控制器。下位机（飞控）相关档案在上级目录 `../Low_MCU/`。
 >
-> 想了解"项目目标 / 架构 / 协议决策"，先读上级 `../README.md` 与 `../agent.md`；本文件侧重**本目录是什么、怎么组织、怎么跑**。
+> 想了解"项目目标 / 架构 / 协议决策"，先读上级 `../README.md` 与 `../AGENTS.md`；本文件侧重**本目录是什么、怎么组织、怎么跑**。
 
 ---
 
@@ -26,7 +28,7 @@
 **文档类**
 - **`README.md`**：本文件——上位机目录的总览与目录说明。
 - **`AGENT_GUIDE.md`**：上位机开发指导（职责、阶段路线图、技术底座、通信协议、代码结构、实况、风险）。动手改代码前应先读。
-- **`difficulty_and_method.md`**：**困难与解决办法**记录（编号 A 工具链 / B 相机链路 / C 内存 / D 硬件误判 / E 远程 / F 刷机 / G 命令速查 / H 待办），用于复盘与面试。
+- **`../困难与解决办法.md`**：**全项目踩坑档案**（上位机 + 下位机 + 联调），用于复盘与面试。
 - **`diary.md`**：**上位机操作手册**——如何在本目录编译/部署/运行各功能模块（相机取帧、RTSP、绿色检测、MSP 自测、闭环程序）与排错、板子命令速查。
 
 **实验档案 `experiments/`（核心工作区）**
@@ -91,13 +93,13 @@ ssh root@10.222.2.1 'cd /root/mirocfly && \
 - **运行环境**：`LD_LIBRARY_PATH=/mnt/system/usr/lib:/mnt/system/usr/lib/3rd`；链接期注意 `-lgdc`（板载 `libvi/libvpss` 依赖）。
 - **ION 内存**：反复运行后若异常，`reboot` 干净重启；正常退出（SIGTERM）会回收，`kill -9` 会泄漏。
 - **测试永远渐进**：拔桨 → 绑绳 → 短飞；电机解锁前占空比=0；错误状态必须禁能电机。
-- **文档同步**：推进/方案变更时更新 `AGENT_GUIDE.md`、`difficulty_and_method.md`、上级 `README.md`/`agent.md`。
+- **文档同步**：推进/方案变更时更新 `AGENT_GUIDE.md`、根 `困难与解决办法.md`、上级 `README.md`/`AGENTS.md`。
 
 ## 6. 相关文档
 
-- 项目总览 / AI 上下文：`../README.md`、`../agent.md`
+- 项目总览 / AI 上下文：`../README.md`、`../AGENTS.md`
 - 上位机开发指导：`./AGENT_GUIDE.md`
-- 困难与解决（复盘/面试）：`./difficulty_and_method.md`
+- 困难与解决（复盘/面试）：`../困难与解决办法.md`
 - 实验索引：`./experiments/README.md`
 - 操作手册（编译/部署/运行/排错）：`./diary.md`
 - 下位机经验存档：`../Low_MCU/archive_at32/agent_at32.md`

@@ -1,10 +1,23 @@
 > ⭐ **【第一要务 · 教学优先】** 所有的开发都是以学习为目的，让我学会东西为前提，而并非把目标完成放在第一位，我要穷究原理，哪怕工期可能延误，我会多抽出其他时间，所以你要以教学和传授方法知识为第一要务。
 > 📖 **开工前必读**：`../../agent问答示例.md` —— 先学习其中的逻辑与思路（要做什么 → 为什么 → 由谁做基础），并作为**贯穿始终的回答方式**。
+> 📦 **2026-10-22 借出/备份**：上位机借出前已备份到 `/home/user/backups/licheervnano_2026-10-21/`（完整 rootfs、项目快照、`/boot` 原始镜像、恢复说明、SHA256）。借出期间下位机优先用 FC USB + 黑匣子；不要在借出机上改 FC 配置。
+> 🎯 **2026-10-23 当前阶段**：暂停纯光流定点；上位机转“MSP 三轴接管 + 视觉识别/接近/撞击”。旧 exp20 的 ch7 语义与当前 FC 相反（FC：中=定高、高=定点），先统一再飞；上位机看门狗未做。
+> 🆕 **2026-11-03 状态（取代上一条的阶段描述）**：
+> - **板子 IP 已变：`10.117.42.1`（旧 `10.222.2.1` 作废）**；主机侧 RNDIS 网段 `10.117.42.x`。
+> - **旧板烧毁、旧相机模组损坏**；新板 + 新相机 + 新排线已验证：I2C `0x4653`、`warmup done: 10 frames`、RTSP `rtsp://10.117.42.1:8554/live`（HEVC 1280×720@30）可播。
+> - **相机下倾 12° 定稿**（±1° 装配公差），不再改；攻击高度按目标 +10cm。
+> - **视觉外包给同学**：接口 `vision_iface.h`（UDP 127.0.0.1:7788，`vif_frame_t` 152B，dx/dy 以画面中心为原点、右正上正）已冻结；对接文稿与参考代码包见 `experiments/111/`。
+> - **控制端框架**：`experiments/2026-11-03_24_vision_control/`（L1 收帧 → L2 选目标/平滑 → L3 映射 → L4 门控+MSP），mock 源 `mock_vision.c` 可先跑通控制律。
+> - **下一步**：mask 将扩展为 15（油门交上位机）→ 起飞/降落/返航纳入状态机；任务时长不再固定 30s，改由电量（vbat/mAh）决定。
+> 🔗 **2026-11-05 联网**：板子现在有**两个 IP**——USB `10.117.42.1`（调试后路）、**WiFi `192.168.1.165`**（SSID `Potential-Robot`，2.4G）。`/etc/init.d/S45wifi` 开机自连；省电已关。**RTSP 走 WiFi 会卡**（2.4G 拥挤），调参看画面优先插 USB；视觉/控制两程序都在板上走 loopback，不受网络影响。
+> 🧠 **2026-11-05 控制端**：exp24 现为“权限层 + 任务层 + SEARCH”；`ch8>1700` 接管、`ch6` 子模式（1300–1700 yaw 跟随）、`ch7` 归 FC；i5+mock 全场景通过（详见 exp24 README §9）。
+> 🔌 **2026-11-09 上下位机链路**：`/dev/ttyS0` @ **230400** ↔ 飞控 MSP 口，`MSP_RC/ACTIVEBOXES/BOXIDS/ATTITUDE` 20/20 应答。**ttyS0 是内核控制台**（`console=ttyS0,115200`），但 `loglevel=0` 下 230400 工作正常，不稳时改用 `ttyS1..3`。授权门 = `BOXMSPRCOVERRIDE` **pid 41**（本板 bit20），不是 50；`vision_bridge` 用 `MIROCFLY_OVR_PID` 配置（默认 41）。工具：`experiments/2026-11-08_28_fc_link/`（`msp_link` 支持 `--loopback`、`MSP_PROBE`、`MSP_RATE`）。
+> 🎥 **2026-11-08 视觉服务**：`experiments/2026-11-08_27_mirovision/`（M1 采集→推理→UDP、M2 可选 RTSP 叠加、M3 自恢复+守护+开机自启）。**相机倒装必须加 `--rot180`**（VPSS 硬件镜像+翻转，零 CPU 代价）；50 张实拍重校准后置信度 0.40→0.94；录制/回放工具 `--record` + `vif_play`。
 
 # AGENT_GUIDE — 上位机（LicheeRV-Nano / SG2002）开发指导
 
 > 本文件专供后续 AI Agent 在**上位机**文件夹内工作时使用。请先读完本文件，再动手改代码。
-> 困难与解决办法的详细记录见同目录 `difficulty_and_method.md`。
+> 困难与解决办法的详细记录见`../困难与解决办法.md`（全项目踩坑档案）。
 
 ## 1. 项目总体方向（双重目标）
 
@@ -106,7 +119,7 @@ Host_Lichee_RV_Nano/
 - `experiments/2026-10-11_18_msp_takeover/`（🟡**上位机操控下位机**）：`takeover` 两模式——`track`（HSV 绿目标→EMA/滞回→roll/pitch→`SET_RAW_RC`，经 FC `MSP RC Override` 接管）+ `probe`（**方向自检**：脚本化发 roll±/pitch±，回读 `MSP_MOTOR`/`MSP_ATTITUDE`/`MSP_RC`，按相对 neutral 的 Δ 定符号/kp/是否真接管）。**纠正 INAV `msp_override_channels` 位序=AERT**：接管三轴=**7**（FC 已设 7 并 `save`）。**台架验证通过**：接管生效（`MSP_RC` 回读吻合）、油门不被覆盖、混控 Δ 与 `mmix` 一致、符号自洽；**开放问题：水平误差用 roll 还是 yaw（待定）**；真机待标定。
 - **`experiments/2026-10-12_19_opflow_hold/`（🟡光流水平阻尼）**：`flow_damp`——**新增 MSP v2 收发**（`msp2_send_request`/`msp_parser2_feed`，吃 v1+v2 帧；v2 帧 `$X` flags cmd(2) size(2) payload crc8_dvb_s2）+ `mon`（只读 `MSP2_INAV_OPTICAL_FLOW`(0x2001)/`MSP_SONAR_ALTITUDE`(58)）+ `damp`（光流估水平速度→roll/pitch 阻尼，依 FC `navigation_pos_estimator_flow.c` 约定：`v_右=+(flowX-bodyX)·(π/180)·alt`、`v_前=-(flowY-bodyY)·(...)`）。数据通路已验（`q≈40–60`，质量一般）。
 - **`experiments/2026-10-12_20_paradigm_select/`（🟡接管三轴+范式/定点/定高选择）**：`paradigm`——读 `MSP_RC` 取 ch6/ch7；`ovr=(ch6>1300)||(ch8>1300)`；`ch6>1300`→**范式B**（roll 追踪，`pitch_bias_px` 作垂直基准）；`ch7[1300,1700)`→**定点**（光流阻尼+位置积分，进入清零锚点+泄漏）、`[1700,2100)`→**定高（桩，需 mask=15）**；**接管期间始终叠加基础光流阻尼**。健壮性：`MIROCFLY_CAM_ROT=0|180`（相机倒装冗余，检测前 `cv::rotate`）、`alt` 无效值(0xFFFFFFFF/异常)回退兜底高度、光流无效时阻尼/积分归零。`mon`/`dry` 已验证（开关读值/模式判定/视觉符号自洽），**待台架真机**。预启动 `run/stop_paradigm.sh`。
-- **面试复盘**：`interview_notes.md`（按阶段 Q&A）+ `edge_ai_cheatsheet.md`（速查）。
+- **复习/面试资料**：`review/面试_notes.md`（按阶段 Q&A）+ `review/edge_ai_cheatsheet.md`（速查）；目录说明见 `review/README.md`。
 - **实验 01/02/03（旧/存档）**：低层 MMF、sipeed 链、Form A 首次实验，均不再作为正解。
 - `sensor_cfg.ini`：GC4653 **beta**（= 板默认）；由镜像 `/etc/init.d/S02config` 选 alpha/beta + 设 pinmux。
 - **工具链**：`LicheeRV-Nano-Build_official/host-tools/gcc/riscv64-linux-musl-x86_64/`。
@@ -121,7 +134,7 @@ Host_Lichee_RV_Nano/
 5. NPU INT8 对自定义目标精度 → 保留 HSV 兜底。
 6. 撞击检测用 `MSP_RAW_IMU` 轮询（采样率受限）→ 与视觉"bbox 达阈值"联合判定。
 7. **定高/定点改为下位机固件实现（上位机定高冻结，2026-10-14 定；10-15 修订：定高优先、定点条件重开）**：无气压计时 INAV 的 `est.pos.z` **没有测距来源**（测距只进 AGL 估计，且 AGL 还要求 `EST_BARO_VALID`），故 ALTHOLD/POSHOLD 无法准入。**决定：在固件加“测距 Z 分支”让二者可用**（见 `../Low_MCU/new_mcu/AGENT_GUIDE.md` §5.6）。**上位机侧自算定高（接管油门做高度环）冻结、不做**。**POSHOLD 另有无 GPS 解锁拦截问题（见下），故一期只做 ALTHOLD，定点以“光流/地面测试”结论为门。**
-8. **已到 `exp20`（接管三轴+范式/定点/定高选择）**。⚠️ **2026-10-14 调整接管方案**：发射器只留 **`ch5`=锁桨 + `ch8`=接管**；`ch8` 高区间启用 `OVERRIDE+ANGLE+ALTHOLD`（**POSHOLD 视光流结论再定**）；**接管分两步**——**一期**只接管 roll/pitch/yaw（`mask=7`，飞行员持油门），**二期**再接管油门（`mask=15`）。失效统一 `LAND`（慢降），**不返航**。详见根 `agent.md` §3.5。旧的 ch6/ch7（范式/定点/定高选择）方案**作废**。**下一步（2026-10-15 起）**：① **阶段 0：光流/地面测试**——用 `paradigm mon` 在**光滑地板 vs 有纹理不反光地垫**、不同光照/高度下测 `q` 与流方向，并用尺子对比测距误差（结论决定是否重开 POSHOLD）；② 台架验三轴接管（追踪/阻尼、调 `kpvis/kd/sx/sy`）；③ 真机短飞；④ 固件 Z 分支与定高（见 `Low_MCU` 指南）。相机固定前视：**pitch 下倾 ~10–15°**、倒装用 `CAM_ROT=180`、换装后重跑静态标定并标 `pitch_bias_px`。视觉改 YOLO（阶段2）时本层只换检测源。
+8. **已到 `exp20`（接管三轴+范式/定点/定高选择）**。⚠️ **2026-10-14 调整接管方案**：发射器只留 **`ch5`=锁桨 + `ch8`=接管**；`ch8` 高区间启用 `OVERRIDE+ANGLE+ALTHOLD`（**POSHOLD 视光流结论再定**）；**接管分两步**——**一期**只接管 roll/pitch/yaw（`mask=7`，飞行员持油门），**二期**再接管油门（`mask=15`）。失效统一 `LAND`（慢降），**不返航**。详见根 `AGENTS.md` §3.5。旧的 ch6/ch7（范式/定点/定高选择）方案**作废**。**下一步（2026-10-15 起）**：① **阶段 0：光流/地面测试**——用 `paradigm mon` 在**光滑地板 vs 有纹理不反光地垫**、不同光照/高度下测 `q` 与流方向，并用尺子对比测距误差（结论决定是否重开 POSHOLD）；② 台架验三轴接管（追踪/阻尼、调 `kpvis/kd/sx/sy`）；③ 真机短飞；④ 固件 Z 分支与定高（见 `Low_MCU` 指南）。相机固定前视：**pitch 下倾 ~10–15°**、倒装用 `CAM_ROT=180`、换装后重跑静态标定并标 `pitch_bias_px`。视觉改 YOLO（阶段2）时本层只换检测源。
 9. **无 GPS 时配置 POSHOLD/RTH/WP 会拦截解锁（2026-10-15 核实）**：`isUsingNAVModes` 含 POSHOLD/RTH/WP 等（不含 ALTHOLD）→ 解锁要求 `STATE(GPS_FIX_HOME)`，无 GPS 时拒绝解锁。故“先定高、定点后置”。另 `eph` 仅在光流更新超时时增长 → 光流健康是定点前提。详见 `../Low_MCU/new_mcu/AGENT_GUIDE.md` §6-19。
 10. **看门狗（纳入计划）**：FC 已有隐式链路看门狗（MSP 超时→failsafe），但上位机内部假死可能仍发陈旧指令 → 计划加“控制循环心跳+监督线程，超时停发 RC”；**无人飞行前必做**。
 11. **阶段 0 结论（2026-10-15，只读 `paradigm mon` 实测，已定论）**：**光流质量由“表面纹理”主导，与高度基本无关**。
@@ -134,4 +147,4 @@ Host_Lichee_RV_Nano/
 
 12. **定高首飞与黑匣子定论（2026-10-17，用户试飞）**：Z 分支固件在飞；黑匣子 `~/Downloads/第一次定高.TXT` 证实 **`ANGLE｜NAV_ALTHOLD` 真实生效**（`flightModeFlags=10`）、**高度估计可信**（`navFlags bit0=1`，Z 分支在飞行中给出 TRUSTED 高度）、爬升 ~1.66m。**问题**：① 手感反馈**水平漂**（黑匣子里电机输出长期不对称，m0 恒低 ~50，疑 CoG/校准 + ANGLE 无位置环固有）；② **灵敏度高（轻打杆大幅动作）**；③ **段4 结尾 ~14.4s 翻滚坠机**（roll→70°、m1 饱和 2000、油门命令顶满但高度反降，`navState` 1→3，已归因见段末"10-17 晚更新"）。`mon` 扩展字段（z/vz/R/P/Y/T）已在本次验证中实用（注意未解锁 z 恒 0）。**10-17 晚更新**：坠机已归因（`nav_mc_hover_thr` 未标定）+ 修复（hover_thr=1585、`inav_max_surface_altitude` 200→400cm）+ 拨入瞬态复测通过；失效核实：拔上位机串口只回落物理遥控、不 LAND（详见 `../Low_MCU/new_mcu/AGENT_GUIDE.md` §5.7）。**深夜更新**：光流遥测符号 bug 已修（新固件 `7e2d65a5`）+ `align_opflow=CW90` 定标验证（右→+X、前→−Y）；⚠️ **exp19/20 的阻尼参数（kd/sx/sy）曾在丢符号数据上标定，需复核**；`opflow_scale` 维持 1.133（手持标定被死区 <~50°/s / 饱和 >~400°/s 污染 → 待飞行中标定，见下位机指南 §6-27）。
 
-> 维护提醒：每次推进/方案变更，同步更新本文件 + 根 `README.md` / `agent.md` + `difficulty_and_method.md`。
+> 维护提醒：每次推进/方案变更，同步更新本文件 + 根 `README.md` / `AGENTS.md` + 根 `困难与解决办法.md`。

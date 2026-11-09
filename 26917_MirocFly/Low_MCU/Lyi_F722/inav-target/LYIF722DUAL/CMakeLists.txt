@@ -1,0 +1,1 @@
+target_stm32f722xe(LYIF722DUAL DISABLE_MSC)
