@@ -50,3 +50,5 @@ z杂物间/
 SOLDIER_LEG_4/**/*.d
 SOLDIER_LEG_4/**/*.dep
 SOLDIER_LEG_4/**/*.htm
+# 本地大目录（不入库）
+SOLDIER_LEG_4/
